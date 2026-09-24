@@ -1,0 +1,169 @@
+{
+  "name": "Flow 5 - Realtime Status Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "flow5-status-tracker",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c1a2b3c4-0001-4000-8000-000000000001",
+      "name": "Webhook - Receive Status Change",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "flow5-status-tracker"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO task_logs (task_id, changed_by, old_status, new_status, comment)\nVALUES (\n  '{{ $json.body.task_id }}',\n  {{ $json.body.changed_by ? \"'\" + $json.body.changed_by + \"'\" : 'NULL' }},\n  '{{ $json.body.old_status }}',\n  '{{ $json.body.new_status }}',\n  'Logged by n8n Flow 5: {{ $json.body.old_status }} → {{ $json.body.new_status }}'\n)\nRETURNING *;",
+        "options": {}
+      },
+      "id": "c1a2b3c4-0001-4000-8000-000000000002",
+      "name": "Postgres - Insert Task Log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [500, 300],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Productivity PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT created_at FROM tasks WHERE id = '{{ $json.body.task_id }}';",
+        "options": {}
+      },
+      "id": "c1a2b3c4-0001-4000-8000-000000000003",
+      "name": "Postgres - Get Task Created At",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [750, 300],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Productivity PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lấy dữ liệu từ webhook và query trước đó\nconst webhookData = $('Webhook - Receive Status Change').first().json.body;\nconst taskData = $input.first().json;\n\n// Tính lead time (chỉ khi status = DONE)\nlet lead_time_hours = null;\n\nif (webhookData.new_status === 'DONE') {\n  const createdAt = new Date(taskData.created_at);\n  const now = new Date();\n  lead_time_hours = Math.round(\n    ((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60)) * 100\n  ) / 100;\n}\n\nreturn [{\n  json: {\n    task_id: webhookData.task_id,\n    task_title: webhookData.task_title,\n    project_id: webhookData.project_id,\n    old_status: webhookData.old_status,\n    new_status: webhookData.new_status,\n    changed_by: webhookData.changed_by || null,\n    lead_time_hours: lead_time_hours,\n    timestamp: webhookData.timestamp,\n    message: lead_time_hours\n      ? `✅ Task \"${webhookData.task_title}\" hoàn thành! Lead time: ${lead_time_hours} giờ`\n      : `🔄 Task \"${webhookData.task_title}\": ${webhookData.old_status} → ${webhookData.new_status}`\n  }\n}];"
+      },
+      "id": "c1a2b3c4-0001-4000-8000-000000000004",
+      "name": "Code - Calculate Lead Time",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO activity_history\n  (task_id, member_id, action_type, old_value, new_value, lead_time_hours, metadata)\nVALUES (\n  '{{ $json.task_id }}',\n  {{ $json.changed_by ? \"'\" + $json.changed_by + \"'\" : 'NULL' }},\n  'STATUS_CHANGE',\n  '{{ $json.old_status }}',\n  '{{ $json.new_status }}',\n  {{ $json.lead_time_hours || 'NULL' }},\n  '{{ JSON.stringify({ source: \"n8n_flow5\", task_title: $json.task_title, project_id: $json.project_id }) }}'\n)\nRETURNING *;",
+        "options": {}
+      },
+      "id": "c1a2b3c4-0001-4000-8000-000000000005",
+      "name": "Postgres - Insert Activity History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1250, 300],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Productivity PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  success: true,\n  flow: 'flow5-realtime-status-tracker',\n  task_id: $json.task_id,\n  old_status: $('Code - Calculate Lead Time').first().json.old_status,\n  new_status: $('Code - Calculate Lead Time').first().json.new_status,\n  lead_time_hours: $('Code - Calculate Lead Time').first().json.lead_time_hours,\n  message: $('Code - Calculate Lead Time').first().json.message,\n  processed_at: new Date().toISOString()\n} }}",
+        "options": {}
+      },
+      "id": "c1a2b3c4-0001-4000-8000-000000000006",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1500, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Receive Status Change": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Insert Task Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Insert Task Log": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Get Task Created At",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Get Task Created At": {
+      "main": [
+        [
+          {
+            "node": "Code - Calculate Lead Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Calculate Lead Time": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Insert Activity History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Insert Activity History": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "member-2",
+      "id": "tag-member-2"
+    },
+    {
+      "name": "flow-5",
+      "id": "tag-flow-5"
+    }
+  ],
+  "triggerCount": 0,
+  "versionId": "1"
+}
