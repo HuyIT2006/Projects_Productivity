@@ -1,0 +1,71 @@
+
+services:
+  # 1. Cơ sở dữ liệu PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: productivity_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mysecretpassword
+      POSTGRES_DB: productivity_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Tự động nạp file schema.sql khi khởi chạy database lần đầu tiên
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - productivity_net
+
+  # 2. Hệ thống tự động hóa n8n
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: productivity_n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=productivity_db
+      - DB_POSTGRESDB_USER=postgres
+      - DB_POSTGRESDB_PASSWORD=mysecretpassword
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - productivity_net
+    depends_on:
+      - postgres
+
+  # 3. Giao diện quản lý Database trực quan (pgAdmin)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: productivity_pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - productivity_net
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:
+  n8n_data:
+  pgadmin_data:
+
+networks:
+  productivity_net:
+    driver: bridge

@@ -74,3 +74,63 @@ INSERT INTO members (full_name, email, skills, max_workload) VALUES
 ('Member 2', 'member2@example.com', ARRAY['Frontend', 'UI/UX', 'Tailwind'], 5),
 ('Member 3', 'member3@example.com', ARRAY['Automation', 'n8n', 'DevOps'], 5)
 ON CONFLICT (email) DO NOTHING;
+
+-- 6. BẢNG LỊCH SỬ HOẠT ĐỘNG (ACTIVITY_HISTORY)
+-- Phục vụ: Realtime Status Tracker (Agent 5), giao diện Activity Feed trên Next.js
+CREATE TABLE IF NOT EXISTS activity_history (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    member_id UUID REFERENCES members(id) ON DELETE SET NULL,
+    action_type VARCHAR(50) NOT NULL,       -- 'STATUS_CHANGE', 'TASK_CREATED', 'TASK_ASSIGNED'
+    old_value VARCHAR(100),                 -- Giá trị cũ (vd: 'TODO')
+    new_value VARCHAR(100),                 -- Giá trị mới (vd: 'IN_PROGRESS')
+    lead_time_hours NUMERIC(10, 2),         -- Lead time tính bằng giờ (chỉ khi task DONE)
+    metadata JSONB DEFAULT '{}',            -- Dữ liệu bổ sung linh hoạt
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- DỮ LIỆU MẪU CHO TESTING LUỒNG 5
+-- ============================================
+
+-- Dự án mẫu
+INSERT INTO projects (id, name, description, start_date, deadline, status) VALUES
+('a0000001-0000-0000-0000-000000000001', 'AI Productivity System', 'Hệ thống quản lý năng suất nhóm với AI & n8n', '2026-09-01', '2026-12-31', 'ACTIVE'),
+('a0000001-0000-0000-0000-000000000002', 'E-Commerce Platform', 'Website thương mại điện tử với Next.js', '2026-10-01', '2027-03-31', 'ACTIVE')
+ON CONFLICT (id) DO NOTHING;
+
+-- Tasks mẫu (dùng subquery để lấy member id theo email)
+INSERT INTO tasks (id, project_id, assignee_id, title, description, story_points, priority, status, due_date) VALUES
+('b0000001-0000-0000-0000-000000000001', 'a0000001-0000-0000-0000-000000000001',
+  (SELECT id FROM members WHERE email = 'huy@example.com'),
+  'Setup Docker & PostgreSQL', 'Cấu hình Docker Compose cho toàn bộ dự án', 3, 'HIGH', 'DONE',
+  '2026-09-10 23:59:59+07'),
+('b0000001-0000-0000-0000-000000000002', 'a0000001-0000-0000-0000-000000000001',
+  (SELECT id FROM members WHERE email = 'member2@example.com'),
+  'Design Kanban Board UI', 'Thiết kế giao diện Kanban Board với Tailwind CSS', 5, 'HIGH', 'IN_PROGRESS',
+  '2026-09-20 23:59:59+07'),
+('b0000001-0000-0000-0000-000000000003', 'a0000001-0000-0000-0000-000000000001',
+  (SELECT id FROM members WHERE email = 'member3@example.com'),
+  'Setup n8n Workflows', 'Cấu hình 4 workflow tự động hóa trên n8n', 5, 'MEDIUM', 'IN_PROGRESS',
+  '2026-09-25 23:59:59+07'),
+('b0000001-0000-0000-0000-000000000004', 'a0000001-0000-0000-0000-000000000001',
+  (SELECT id FROM members WHERE email = 'huy@example.com'),
+  'Implement API Routes', 'Xây dựng REST API cho task management', 8, 'HIGH', 'TODO',
+  '2026-09-30 23:59:59+07'),
+('b0000001-0000-0000-0000-000000000005', 'a0000001-0000-0000-0000-000000000001',
+  (SELECT id FROM members WHERE email = 'member2@example.com'),
+  'Tích hợp Webhook n8n', 'Kết nối Next.js với n8n thông qua webhook', 5, 'MEDIUM', 'TODO',
+  '2026-10-05 23:59:59+07'),
+('b0000001-0000-0000-0000-000000000006', 'a0000001-0000-0000-0000-000000000001',
+  (SELECT id FROM members WHERE email = 'member3@example.com'),
+  'Viết Unit Tests', 'Viết test cho API routes và React components', 3, 'LOW', 'TODO',
+  '2026-10-10 23:59:59+07'),
+('b0000001-0000-0000-0000-000000000007', 'a0000001-0000-0000-0000-000000000001',
+  (SELECT id FROM members WHERE email = 'huy@example.com'),
+  'Deploy lên Production', 'Triển khai hệ thống lên server production', 8, 'URGENT', 'TODO',
+  '2026-10-15 23:59:59+07'),
+('b0000001-0000-0000-0000-000000000008', 'a0000001-0000-0000-0000-000000000001',
+  (SELECT id FROM members WHERE email = 'member2@example.com'),
+  'Code Review Sprint 1', 'Review toàn bộ code của sprint đầu tiên', 2, 'MEDIUM', 'IN_REVIEW',
+  '2026-09-28 23:59:59+07')
+ON CONFLICT (id) DO NOTHING;
