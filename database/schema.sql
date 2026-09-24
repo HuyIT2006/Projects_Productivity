@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS members (
     telegram_id VARCHAR(50), -- Dùng cho n8n gửi thông báo/standup bot
     skills TEXT[] DEFAULT '{}', -- Danh sách kỹ năng: {'Next.js', 'PostgreSQL', 'Docker'}
     max_workload INT DEFAULT 5, -- Số task tối đa có thể nhận cùng lúc
-    productivity_score NUMERIC(4, 2) DEFAULT 100.00, -- Điểm năng suất (do Agent 8 cập nhật)
+    productivity_score NUMERIC(5, 2) DEFAULT 100.00, -- Điểm năng suất (do Agent 8 cập nhật)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
