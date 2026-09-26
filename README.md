@@ -16,7 +16,7 @@ Dự án quản lý dự án và năng suất thông minh với Next.js, Postgre
   - `member-3/`: 4 luồng Dự báo rủi ro & Báo cáo.
 
 ## 👥 Phân công nhiệm vụ (12 luồng)
-### Thành viên 1: Planning & Resource Allocation
+### HoaiTrinh: Planning & Resource Allocation
 1. Luồng 1: AI Task Breakdown
 2. Luồng 2: Smart Workload Balancer
 3. Luồng 3: Skill Matrix Matching
