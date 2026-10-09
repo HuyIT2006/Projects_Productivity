@@ -1,0 +1,136 @@
+{
+  "name": "Luồng 3: Skill Matrix Matching",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "skill-matching",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "51f8c143-4c23-48f7-a4cb-41e3fc31a530",
+      "name": "Webhook",
+      "webhookId": "f21b9009-97b4-4086-a69c-d17d5af1aa52"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  t.id AS task_id, \n  t.title AS task_title, \n  t.required_skills,\n  m.id AS member_id, \n  m.full_name AS member_name, \n  m.skills AS member_skills\nFROM tasks t\nCROSS JOIN members m\nWHERE t.assignee_id IS NULL AND array_length(t.required_skills, 1) > 0;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "fc247b95-1cde-45b4-b252-ef0eadef71b5",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (items.length === 0) return [];\n\n// Gom nhóm theo từng task_id và tính điểm match %\nconst taskMap = {};\n\nfor (const item of items) {\n  const data = item.json;\n  const taskId = data.task_id;\n  const required = data.required_skills || [];\n  const memberSkills = data.member_skills || [];\n\n  // Đếm số kỹ năng trùng nhau giữa Task và Member\n  const matched = required.filter(rSkill => \n    memberSkills.some(mSkill => mSkill.toLowerCase().trim() === rSkill.toLowerCase().trim())\n  );\n\n  // Tính điểm Match Score %\n  const score = required.length > 0 ? (matched.length / required.length) * 100 : 0;\n\n  if (!taskMap[taskId]) {\n    taskMap[taskId] = {\n      task_id: taskId,\n      task_title: data.task_title,\n      best_member_id: data.member_id,\n      best_member_name: data.member_name,\n      best_score: score\n    };\n  } else if (score > taskMap[taskId].best_score) {\n    taskMap[taskId].best_member_id = data.member_id;\n    taskMap[taskId].best_member_name = data.member_name;\n    taskMap[taskId].best_score = score;\n  }\n}\n\nreturn Object.values(taskMap).map(res => ({ json: res }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "4adab5e7-d898-4266-b2d4-c18ba61eb039",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tasks \nSET assignee_id = '{{ $json.best_member_id }}', updated_at = CURRENT_TIMESTAMP\nWHERE id = '{{ $json.task_id }}'\nRETURNING id, title, assignee_id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        0
+      ],
+      "id": "8aca4252-0148-4e39-9505-1428f5994456",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "body": {
+            "trigger": "match_skills"
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7b56e887-cd83-4fec-960a-3b6eac91a20d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "33515e9d621b9af39628b241f4fb5fb52353580cedd8c7947d66ef61b2ad0564"
+  },
+  "nodeGroups": [],
+  "id": "PHXuo46gdJzvAx3S",
+  "tags": []
+}
