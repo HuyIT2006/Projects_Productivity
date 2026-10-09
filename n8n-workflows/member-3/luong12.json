@@ -1,0 +1,176 @@
+{
+  "name": "luong12",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 17
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "0ec44efe-6024-4e7c-b788-865733279d7e",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.full_name, COUNT(t.id) as active_tasks, SUM(t.story_points) as total_points\nFROM members m\nJOIN tasks t ON m.id = t.assignee_id\nWHERE t.status = 'IN_PROGRESS'\nGROUP BY m.id, m.full_name;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "d285933b-460b-4095-94a0-e7561e9848c9",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "8h92NkUaOJ8thyTF",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ],
+      "id": "1fe908c3-aed5-46c7-89ea-af28d8e28e71",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-3-flash-preview"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Bạn là Giám đốc nhân sự. Dưới đây là danh sách các nhân sự đang phải gánh khối lượng công việc (Story Points) cao bất thường trong dự án:\n{{ $json.data }}\n\nHãy đánh giá nguy cơ Burnout/Overtime của team và đưa ra lời khuyên. BẮT BUỘC trả về CHỈ chuỗi JSON sau:\n{\n  \"burn_rate_score\": 90,\n  \"ai_warning\": \"Điền một câu cảnh báo ngắn và đề xuất san sẻ công việc\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "96746f65-a930-4223-a588-dc1b06e764a2",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "FM0Q328pa4LU4fDH",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO reports (project_id, report_type, risk_score, ai_summary)\nVALUES (\n    'a0000001-0000-0000-0000-000000000001', \n    'BURNOUT_WARNING', \n    {{ JSON.parse($json.content.parts[0].text).burn_rate_score }}, \n    $${{ JSON.parse($json.content.parts[0].text).ai_warning }}$$\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "1594f5e2-a181-409e-b191-80c567851520",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "8h92NkUaOJ8thyTF",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "a210360c-b91c-4508-a7f9-8569e740a958",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ba2ff6236c53cc3094a25409901a5f23d54d6d0427ae4975062e6154d2291e5f"
+  },
+  "nodeGroups": [],
+  "id": "QQ7xmk7eorhbXYhJ",
+  "tags": []
+}
