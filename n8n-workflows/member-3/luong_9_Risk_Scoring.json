@@ -1,0 +1,170 @@
+{
+  "name": "Luồng 9 - Risk Scoring",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "7b5bbb2e-6296-440a-a565-497b8938b6a8",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    t.id AS task_id, \n    t.title, \n    t.priority, \n    t.due_date, \n    m.full_name AS assignee\nFROM tasks t\nLEFT JOIN members m ON t.assignee_id = m.id\nWHERE t.status != 'DONE';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "dd0cb4b4-da3b-47bc-bf29-1bd53b0a4bd7",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "8h92NkUaOJ8thyTF",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ],
+      "id": "f3932943-a4d6-4ec2-8c26-ea82707b4a0c",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-3-flash-preview"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Bạn là chuyên gia quản lý rủi ro. Dưới đây là danh sách các công việc chưa hoàn thành:\n{{ $json.data }}\n\nHãy phân tích và đánh giá mức độ rủi ro chung của toàn bộ danh sách này (lưu ý các task trễ hạn, độ ưu tiên HIGH/URGENT).\nBẮT BUỘC trả về kết quả CHỈ bằng một chuỗi JSON có định dạng sau (không giải thích thêm):\n{\n  \"risk_score\": 75,\n  \"ai_summary\": \"Điền 1 câu cảnh báo ngắn gọn về các công việc nguy hiểm nhất vào đây\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "ce95f136-341d-44fd-85b8-36716f8a2714",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "FM0Q328pa4LU4fDH",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO reports (project_id, report_type, risk_score, ai_summary)\nVALUES (\n    'a0000001-0000-0000-0000-000000000001', \n    'DEADLINE_RISK', \n    {{ JSON.parse($json.content.parts[0].text).risk_score }}, \n    $${{ JSON.parse($json.content.parts[0].text).ai_summary }}$$\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1008,
+        0
+      ],
+      "id": "80e2fc08-3fff-44c2-83ba-71f31f25885f",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "8h92NkUaOJ8thyTF",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "118a775a-cb97-4135-8019-d63a23de6803",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ba2ff6236c53cc3094a25409901a5f23d54d6d0427ae4975062e6154d2291e5f"
+  },
+  "nodeGroups": [],
+  "id": "b9OoGvfUVYgy8pSe",
+  "tags": []
+}
