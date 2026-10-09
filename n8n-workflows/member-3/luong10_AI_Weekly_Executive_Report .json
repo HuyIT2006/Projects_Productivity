@@ -1,0 +1,180 @@
+{
+  "name": "Luong10",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                5
+              ],
+              "triggerAtHour": 17
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "971f8b58-658f-49df-9ccb-567ef23a8c1c",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT t.title, t.story_points, m.full_name AS assignee\nFROM tasks t\nLEFT JOIN members m ON t.assignee_id = m.id\nWHERE t.status = 'DONE' \nAND t.updated_at >= CURRENT_DATE - INTERVAL '7 days';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "a211fa55-7bb0-4de5-8f60-d4320d14f2b7",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "8h92NkUaOJ8thyTF",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ],
+      "id": "c2e58f31-647d-4c6e-a232-900b03dbfa75",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-3-flash-preview"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Bạn là Giám đốc dự án. Dưới đây là danh sách các công việc team đã hoàn thành trong tuần qua:\n{{ $json.data }}\n\nHãy viết một báo cáo tổng kết ngắn gọn.\nBẮT BUỘC trả về kết quả CHỈ bằng một chuỗi JSON có định dạng sau (không giải thích thêm):\n{\n  \"ai_summary\": \"Viết 2-3 câu tóm tắt thành tích của team và những điểm sáng trong tuần\",\n  \"completed_tasks_count\": 1\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "5a03ab13-9c2c-43a0-afe8-54c8b468414e",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "FM0Q328pa4LU4fDH",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO reports (project_id, report_type, ai_summary, metrics)\nVALUES (\n    'a0000001-0000-0000-0000-000000000001', \n    'WEEKLY_REPORT', \n    $${{ JSON.parse($json.content.parts[0].text).ai_summary }}$$,\n    jsonb_build_object('completed_tasks', {{ JSON.parse($json.content.parts[0].text).completed_tasks_count }})\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "a44f4244-fabb-4592-b419-f436aa8b3a0a",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "8h92NkUaOJ8thyTF",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f57676d4-269c-4fb4-a24e-40479b4a057f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ba2ff6236c53cc3094a25409901a5f23d54d6d0427ae4975062e6154d2291e5f"
+  },
+  "nodeGroups": [],
+  "id": "iJoDHliukmwmIs6D",
+  "tags": []
+}
