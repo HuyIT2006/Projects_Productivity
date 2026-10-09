@@ -1,0 +1,136 @@
+{
+  "name": "Luồng 4: Sprint Auto-scheduling",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sprint-auto-schedule",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "fafc8221-8feb-4595-a6a2-7fb48617e7e8",
+      "name": "Webhook",
+      "webhookId": "35cf35fb-d7c4-45cd-a31d-856d413e45aa"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  t.id AS task_id, \n  t.title, \n  t.story_points, \n  t.priority,\n  COALESCE(m.productivity_score, 100.00) AS productivity_score,\n  p.start_date AS project_start_date\nFROM tasks t\nJOIN projects p ON p.id = t.project_id\nLEFT JOIN members m ON m.id = t.assignee_id\nWHERE t.project_id = '{{ $json.body.project_id }}'\nORDER BY \n  CASE t.priority\n    WHEN 'URGENT' THEN 1\n    WHEN 'HIGH' THEN 2\n    WHEN 'MEDIUM' THEN 3\n    WHEN 'LOW' THEN 4\n    ELSE 5\n  END ASC,\n  t.created_at ASC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "fc7a04b7-ca99-46fd-9afd-e4dbd22b3722",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (items.length === 0) return [];\n\n// Lấy ngày bắt đầu dự án hoặc mốc thời gian hiện tại\nlet currentDate = new Date(items[0].json.project_start_date || Date.now());\n\nconst results = [];\n\nfor (const item of items) {\n  const data = item.json;\n  const storyPoints = data.story_points || 1;\n  const productivity = parseFloat(data.productivity_score) || 100;\n\n  // Tính số ngày cần hoàn thành task (giả định 1 member làm được 2 points/ngày)\n  const daysNeeded = Math.max(1, Math.ceil(storyPoints / ((productivity / 100) * 2)));\n\n  // Tịnh tiến ngày due_date tiếp theo\n  currentDate.setDate(currentDate.getDate() + daysNeeded);\n\n  results.push({\n    json: {\n      task_id: data.task_id,\n      title: data.title,\n      calculated_days: daysNeeded,\n      due_date: currentDate.toISOString()\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "0b1226ad-62e9-47ba-9713-9359ecc4db15",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tasks \nSET due_date = '{{ $json.due_date }}'::timestamptz, updated_at = CURRENT_TIMESTAMP\nWHERE id = '{{ $json.task_id }}'\nRETURNING id, title, due_date;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        0
+      ],
+      "id": "0e8a30e6-7382-45e9-80ae-00087e3c9150",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "body": {
+            "project_id": "a0000001-0000-0000-0000-000000000001"
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "99084624-4987-4918-a35c-9e2b6bac856e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "33515e9d621b9af39628b241f4fb5fb52353580cedd8c7947d66ef61b2ad0564"
+  },
+  "nodeGroups": [],
+  "id": "moqGzAkJrRNuJZxX",
+  "tags": []
+}
