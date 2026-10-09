@@ -1,0 +1,112 @@
+{
+  "name": "Luồng 2: Smart Workload Balancer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "workload-balancer",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "be47ea5f-a394-4eae-9c56-c65d5a086719",
+      "name": "Webhook",
+      "webhookId": "626db0bc-e602-4a65-bd34-038a2f5a15c4"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.id AS member_id, m.full_name, COUNT(t.id) AS current_workload, m.max_workload\nFROM members m\nLEFT JOIN tasks t ON t.assignee_id = m.id AND t.status IN ('TODO', 'IN_PROGRESS')\nGROUP BY m.id, m.full_name, m.max_workload\nHAVING COUNT(t.id) < m.max_workload\nORDER BY current_workload ASC\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "17bc0249-70ac-4ffd-8653-9a48f7c73e76",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tasks \nSET assignee_id = '{{ $json.member_id }}', updated_at = CURRENT_TIMESTAMP\nWHERE id IN (\n  SELECT id FROM tasks \n  WHERE assignee_id IS NULL \n  ORDER BY created_at ASC \n  LIMIT 1\n)\nRETURNING id, title, assignee_id, priority, status;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        448,
+        0
+      ],
+      "id": "0d09cd97-36ce-470c-82e9-f8063c87c243",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "body": {
+            "trigger": "auto_assign"
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7f817756-70ab-4fa9-8341-e432d21df6b9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "33515e9d621b9af39628b241f4fb5fb52353580cedd8c7947d66ef61b2ad0564"
+  },
+  "nodeGroups": [],
+  "id": "oocRhSQZ8DFlarYA",
+  "tags": []
+}
