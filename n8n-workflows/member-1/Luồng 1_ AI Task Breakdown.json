@@ -1,0 +1,149 @@
+{
+  "name": "Luồng 1: AI Task Breakdown",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "task-breakdown",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "fbb358e7-0cb5-4433-bffe-edd6b3df0183",
+      "name": "Webhook",
+      "webhookId": "ab768557-5f5f-4626-ae06-eaa3abf39e36"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-3-flash-preview"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Bạn là một AI Project Manager chuyên nghiệp. \nDựa vào yêu cầu tính năng sau: \"{{ $json.body.feature_description }}\"\n\nHãy phân tích và chia nhỏ tính năng này thành 3 đến 5 task kỹ thuật cụ thể.\nTrả về kết quả duy nhất là một chuỗi JSON Array (không thêm bớt bất kỳ lời giải thích nào và không dùng markdown ```json), định dạng đúng cấu trúc:\n[\n  {\n    \"title\": \"Tên task ngắn gọn\",\n    \"description\": \"Mô tả chi tiết việc cần làm\",\n    \"story_points\": 3,\n    \"required_skills\": [\"Next.js\", \"PostgreSQL\"],\n    \"priority\": \"HIGH\"\n  }\n]"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "56d8ca98-a4a5-4ac6-8994-efde3490c5e9",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "uqlXl6EjKaHi9rT5",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lấy văn bản chứa danh sách Task từ Gemini\nlet rawText = $input.first().json.content.parts[0].text;\n\n// Làm sạch ký tự rác nếu có\nrawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();\n\nconst tasks = JSON.parse(rawText);\nconst projectId = $(\"Webhook\").item.json.body.project_id || \"a0000001-0000-0000-0000-000000000001\";\n\n// Chuyển mảng task thành từng item cho n8n\nreturn tasks.map(task => ({\n  json: {\n    project_id: projectId,\n    title: task.title,\n    description: task.description,\n    story_points: task.story_points || 3,\n    required_skills: task.required_skills || [],\n    priority: task.priority || \"MEDIUM\"\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        0
+      ],
+      "id": "1f3f1963-322b-4728-9e50-637d9d006eef",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO tasks (project_id, title, description, story_points, required_skills, priority, status)\nVALUES (\n  '{{ $json.project_id }}',\n  '{{ $json.title }}',\n  '{{ $json.description }}',\n  {{ $json.story_points }},\n  ARRAY[{{ $json.required_skills.map(s => \"'\" + s.replace(/'/g, \"''\") + \"'\").join(\",\") }}]::text[],\n  '{{ $json.priority }}',\n  'TODO'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        816,
+        0
+      ],
+      "id": "1d276ce3-3074-4fa0-b864-28069182a23f",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "body": {
+            "project_id": "a0000001-0000-0000-0000-000000000001",
+            "feature_description": "Xây dựng hệ thống đăng nhập bằng Google OAuth2 và bảo mật JWT"
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "e5b1721d-fa69-458a-9322-2a5c766f3e0c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "33515e9d621b9af39628b241f4fb5fb52353580cedd8c7947d66ef61b2ad0564"
+  },
+  "nodeGroups": [],
+  "id": "aokB5eAMBX0z8zke",
+  "tags": []
+}
