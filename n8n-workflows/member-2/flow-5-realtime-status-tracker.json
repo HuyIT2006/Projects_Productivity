@@ -1,5 +1,5 @@
 {
-  "name": "Flow 5 - Realtime Status Tracker",
+  "name": "Flow 5 - Realtime Status Tracker v2",
   "nodes": [
     {
       "parameters": {
@@ -8,70 +8,227 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "c1a2b3c4-0001-4000-8000-000000000001",
+      "id": "a1000001-0001-4000-8000-000000000001",
       "name": "Webhook - Receive Status Change",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1.1,
-      "position": [250, 300],
+      "position": [0, 300],
       "webhookId": "flow5-status-tracker"
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "INSERT INTO task_logs (task_id, changed_by, old_status, new_status, comment)\nVALUES (\n  '{{ $json.body.task_id }}',\n  {{ $json.body.changed_by ? \"'\" + $json.body.changed_by + \"'\" : 'NULL' }},\n  '{{ $json.body.old_status }}',\n  '{{ $json.body.new_status }}',\n  'Logged by n8n Flow 5'\n)\nRETURNING *;",
+        "jsCode": "// =====================================================\n// NUT 2: KIEM TRA VA XAC THUC DU LIEU DAU VAO\n// =====================================================\nconst body = $input.first().json.body || {};\n\nconst VALID_STATUSES = ['TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE', 'BLOCKED'];\n\n// Kiem tra cac truong bat buoc\nconst missingFields = [];\nif (!body.task_id)    missingFields.push('task_id');\nif (!body.new_status) missingFields.push('new_status');\nif (!body.old_status) missingFields.push('old_status');\n\n// Kiem tra gia tri status hop le\nconst invalidStatus = (body.new_status && !VALID_STATUSES.includes(body.new_status))\n  ? body.new_status : null;\n\n// Kiem tra xem 2 status co giong nhau khong\nconst isSameStatus = !!(body.old_status && body.new_status && body.old_status === body.new_status);\n\n// Kiem tra dinh dang UUID cua task_id\nconst uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nconst isValidUUID = body.task_id ? uuidRegex.test(body.task_id) : false;\n\nreturn [{\n  json: {\n    is_valid: missingFields.length === 0 && !invalidStatus && !isSameStatus && isValidUUID,\n    missing_fields: missingFields,\n    invalid_status: invalidStatus,\n    same_status: isSameStatus,\n    invalid_uuid: body.task_id && !isValidUUID,\n    body: body\n  }\n}];"
+      },
+      "id": "a1000001-0001-4000-8000-000000000002",
+      "name": "Code - Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-valid-01",
+              "leftValue": "={{ $json.is_valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
         "options": {}
       },
-      "id": "c1a2b3c4-0001-4000-8000-000000000002",
-      "name": "Postgres - Insert Task Log",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
+      "id": "a1000001-0001-4000-8000-000000000003",
+      "name": "IF - Input Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
       "position": [500, 300]
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT created_at FROM tasks WHERE id = '{{ $json.task_id }}';",
+        "respondWith": "json",
+        "responseCode": 400,
+        "responseBody": "={{ { success: false, flow: 'flow5-realtime-status-tracker', error: 'BAD_REQUEST', reason: $json.same_status ? 'old_status va new_status khong duoc giong nhau' : ($json.invalid_uuid ? 'task_id khong dung dinh dang UUID' : 'Thieu hoac sai truong du lieu'), missing_fields: $json.missing_fields, invalid_status: $json.invalid_status, hint: 'Cac status hop le: TODO, IN_PROGRESS, IN_REVIEW, DONE, BLOCKED', timestamp: new Date().toISOString() } }}",
         "options": {}
       },
-      "id": "c1a2b3c4-0001-4000-8000-000000000003",
-      "name": "Postgres - Get Task Created At",
+      "id": "a1000001-0001-4000-8000-000000000004",
+      "name": "Respond - 400 Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [750, 580]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, title, status, project_id, assignee_id, created_at, is_bottleneck\nFROM tasks\nWHERE id = '{{ $json.body.task_id }}'\nLIMIT 1;",
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000005",
+      "name": "Postgres - Check Task Exists",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [750, 300]
     },
     {
       "parameters": {
-        "jsCode": "// Lay du lieu tu webhook va query truoc do\nconst webhookData = $('Webhook - Receive Status Change').first().json.body;\nconst taskData = $input.first().json;\n\n// Tinh lead time (chi khi status = DONE)\nlet lead_time_hours = null;\n\nif (webhookData.new_status === 'DONE') {\n  const createdAt = new Date(taskData.created_at);\n  const now = new Date();\n  lead_time_hours = Math.round(\n    ((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60)) * 100\n  ) / 100;\n}\n\nreturn [{\n  json: {\n    task_id: webhookData.task_id,\n    task_title: webhookData.task_title,\n    project_id: webhookData.project_id,\n    old_status: webhookData.old_status,\n    new_status: webhookData.new_status,\n    changed_by: webhookData.changed_by || null,\n    lead_time_hours: lead_time_hours,\n    timestamp: webhookData.timestamp,\n    message: lead_time_hours\n      ? 'Task hoan thanh! Lead time: ' + lead_time_hours + ' gio'\n      : webhookData.old_status + ' -> ' + webhookData.new_status\n  }\n}];"
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-exists-01",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
-      "id": "c1a2b3c4-0001-4000-8000-000000000004",
-      "name": "Code - Calculate Lead Time",
-      "type": "n8n-nodes-base.code",
+      "id": "a1000001-0001-4000-8000-000000000006",
+      "name": "IF - Task Exists?",
+      "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [1000, 300]
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "INSERT INTO activity_history\n  (task_id, member_id, action_type, old_value, new_value, lead_time_hours, metadata)\nVALUES (\n  '{{ $json.task_id }}',\n  {{ $json.changed_by ? \"'\" + $json.changed_by + \"'\" : 'NULL' }},\n  'STATUS_CHANGE',\n  '{{ $json.old_status }}',\n  '{{ $json.new_status }}',\n  {{ $json.lead_time_hours || 'NULL' }},\n  '{\"source\": \"n8n_flow5\"}'\n)\nRETURNING *;",
+        "respondWith": "json",
+        "responseCode": 404,
+        "responseBody": "={{ { success: false, flow: 'flow5-realtime-status-tracker', error: 'NOT_FOUND', reason: 'Khong tim thay task voi ID nay trong database', task_id: $('Code - Validate Input').first().json.body.task_id, timestamp: new Date().toISOString() } }}",
         "options": {}
       },
-      "id": "c1a2b3c4-0001-4000-8000-000000000005",
-      "name": "Postgres - Insert Activity History",
+      "id": "a1000001-0001-4000-8000-000000000007",
+      "name": "Respond - 404 Task Not Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1250, 580]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO task_logs (task_id, changed_by, old_status, new_status, comment)\nVALUES (\n  '{{ $('Code - Validate Input').first().json.body.task_id }}',\n  {{ $('Code - Validate Input').first().json.body.changed_by ? \"'\" + $('Code - Validate Input').first().json.body.changed_by + \"'\" : 'NULL' }},\n  '{{ $('Code - Validate Input').first().json.body.old_status }}',\n  '{{ $('Code - Validate Input').first().json.body.new_status }}',\n  'Auto-logged by n8n Flow 5 v2'\n)\nRETURNING *;",
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000008",
+      "name": "Postgres - Insert Task Log",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [1250, 300]
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ { success: true, flow: 'flow5-realtime-status-tracker', task_id: $json.task_id, old_status: $('Code - Calculate Lead Time').first().json.old_status, new_status: $('Code - Calculate Lead Time').first().json.new_status, lead_time_hours: $('Code - Calculate Lead Time').first().json.lead_time_hours, message: $('Code - Calculate Lead Time').first().json.message, processed_at: new Date().toISOString() } }}",
+        "operation": "executeQuery",
+        "query": "SELECT id, title, created_at, due_date, story_points\nFROM tasks\nWHERE id = '{{ $('Code - Validate Input').first().json.body.task_id }}';",
         "options": {}
       },
-      "id": "c1a2b3c4-0001-4000-8000-000000000006",
-      "name": "Respond to Webhook",
+      "id": "a1000001-0001-4000-8000-000000000009",
+      "name": "Postgres - Get Task Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================\n// NUT 10: TINH LEAD TIME VA PHAT HIEN BOTTLENECK\n// =====================================================\nconst webhookBody = $('Code - Validate Input').first().json.body;\nconst taskData = $input.first().json;\n\nconst newStatus  = webhookBody.new_status;\nconst oldStatus  = webhookBody.old_status;\n\n// --- Tinh Lead Time (chi khi DONE) ---\nlet lead_time_hours = null;\nlet is_overdue = false;\n\nif (newStatus === 'DONE' && taskData.created_at) {\n  const createdAt = new Date(taskData.created_at);\n  const now       = new Date();\n  lead_time_hours = Math.round(((now - createdAt) / (1000 * 60 * 60)) * 100) / 100;\n\n  if (taskData.due_date) {\n    is_overdue = now > new Date(taskData.due_date);\n  }\n}\n\n// --- Phat hien Bottleneck ---\nconst is_bottleneck = newStatus === 'BLOCKED';\n\n// --- Tao thong diep phu hop ---\nlet message;\nif (newStatus === 'DONE') {\n  message = is_overdue\n    ? 'Task hoan thanh MUON! Lead time: ' + lead_time_hours + ' gio'\n    : 'Task hoan thanh dung han! Lead time: ' + lead_time_hours + ' gio';\n} else if (is_bottleneck) {\n  message = 'CANH BAO: Task bi BLOCKED - can kiem tra nguon luc!';\n} else {\n  message = 'Trang thai thay doi: ' + oldStatus + ' -> ' + newStatus;\n}\n\nreturn [{\n  json: {\n    task_id:          webhookBody.task_id,\n    task_title:       taskData.title || webhookBody.task_title || null,\n    project_id:       webhookBody.project_id || null,\n    old_status:       oldStatus,\n    new_status:       newStatus,\n    changed_by:       webhookBody.changed_by || null,\n    lead_time_hours:  lead_time_hours,\n    is_bottleneck:    is_bottleneck,\n    is_overdue:       is_overdue,\n    story_points:     taskData.story_points || null,\n    timestamp:        webhookBody.timestamp || new Date().toISOString(),\n    message:          message\n  }\n}];"
+      },
+      "id": "a1000001-0001-4000-8000-000000000010",
+      "name": "Code - Calculate Lead Time",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tasks\nSET\n  status        = '{{ $json.new_status }}',\n  is_bottleneck = {{ $json.is_bottleneck }},\n  updated_at    = NOW()\nWHERE id = '{{ $json.task_id }}'\nRETURNING id, title, status, is_bottleneck, updated_at;",
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000011",
+      "name": "Postgres - Update Task Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO activity_history\n  (task_id, member_id, action_type, old_value, new_value, lead_time_hours, metadata)\nVALUES (\n  '{{ $('Code - Calculate Lead Time').first().json.task_id }}',\n  {{ $('Code - Calculate Lead Time').first().json.changed_by ? \"'\" + $('Code - Calculate Lead Time').first().json.changed_by + \"'\" : 'NULL' }},\n  'STATUS_CHANGE',\n  '{{ $('Code - Calculate Lead Time').first().json.old_status }}',\n  '{{ $('Code - Calculate Lead Time').first().json.new_status }}',\n  {{ $('Code - Calculate Lead Time').first().json.lead_time_hours !== null ? $('Code - Calculate Lead Time').first().json.lead_time_hours : 'NULL' }},\n  '{\"source\": \"n8n_flow5_v2\", \"is_bottleneck\": {{ $('Code - Calculate Lead Time').first().json.is_bottleneck }}, \"is_overdue\": {{ $('Code - Calculate Lead Time').first().json.is_overdue }}}'\n)\nRETURNING *;",
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000012",
+      "name": "Postgres - Insert Activity History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-done-01",
+              "leftValue": "={{ $('Code - Calculate Lead Time').first().json.new_status }}",
+              "rightValue": "DONE",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000013",
+      "name": "IF - Is Status DONE?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================\n// NUT 14: TOM TAT KHI TASK HOAN THANH (DONE)\n// =====================================================\nconst data = $('Code - Calculate Lead Time').first().json;\n\nconst efficiency = data.lead_time_hours && data.story_points\n  ? Math.round((data.story_points / data.lead_time_hours) * 100) / 100\n  : null;\n\nconst badge = data.is_overdue ? 'HOAN THANH MUON' : 'HOAN THANH DUNG HAN';\n\nreturn [{\n  json: {\n    event:            'TASK_COMPLETED',\n    badge:            badge,\n    task_id:          data.task_id,\n    task_title:       data.task_title,\n    lead_time_hours:  data.lead_time_hours,\n    story_points:     data.story_points,\n    efficiency_score: efficiency,\n    is_overdue:       data.is_overdue,\n    summary_message:  badge + ' | Task: ' + (data.task_title || data.task_id) + ' | Lead time: ' + data.lead_time_hours + 'h',\n    processed_at:     new Date().toISOString()\n  }\n}];"
+      },
+      "id": "a1000001-0001-4000-8000-000000000014",
+      "name": "Code - Build Completion Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2750, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, flow: 'flow5-realtime-status-tracker', task_id: $('Code - Calculate Lead Time').first().json.task_id, task_title: $('Code - Calculate Lead Time').first().json.task_title, old_status: $('Code - Calculate Lead Time').first().json.old_status, new_status: $('Code - Calculate Lead Time').first().json.new_status, lead_time_hours: $('Code - Calculate Lead Time').first().json.lead_time_hours, is_bottleneck: $('Code - Calculate Lead Time').first().json.is_bottleneck, is_overdue: $('Code - Calculate Lead Time').first().json.is_overdue, message: $('Code - Calculate Lead Time').first().json.message, processed_at: new Date().toISOString() } }}",
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000015",
+      "name": "Respond - 200 Success",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1500, 300]
+      "position": [2750, 480]
     }
   ],
   "connections": {
@@ -79,7 +236,65 @@
       "main": [
         [
           {
+            "node": "Code - Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Validate Input": {
+      "main": [
+        [
+          {
+            "node": "IF - Input Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Input Valid?": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Check Task Exists",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - 400 Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Check Task Exists": {
+      "main": [
+        [
+          {
+            "node": "IF - Task Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Task Exists?": {
+      "main": [
+        [
+          {
             "node": "Postgres - Insert Task Log",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - 404 Task Not Found",
             "type": "main",
             "index": 0
           }
@@ -90,14 +305,14 @@
       "main": [
         [
           {
-            "node": "Postgres - Get Task Created At",
+            "node": "Postgres - Get Task Details",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Postgres - Get Task Created At": {
+    "Postgres - Get Task Details": {
       "main": [
         [
           {
@@ -112,6 +327,17 @@
       "main": [
         [
           {
+            "node": "Postgres - Update Task Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Update Task Status": {
+      "main": [
+        [
+          {
             "node": "Postgres - Insert Activity History",
             "type": "main",
             "index": 0
@@ -123,7 +349,30 @@
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "IF - Is Status DONE?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Is Status DONE?": {
+      "main": [
+        [
+          {
+            "node": "Code - Build Completion Summary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond - 200 Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - 200 Success",
             "type": "main",
             "index": 0
           }
@@ -138,5 +387,5 @@
   "staticData": null,
   "tags": [],
   "triggerCount": 0,
-  "versionId": "1"
+  "versionId": "2"
 }
