@@ -1,37 +1,53 @@
 {
-  "name": "Luồng 9 - Risk Scoring",
+  "name": "luong_9_Risk_Scoring",
   "nodes": [
     {
       "parameters": {
         "rule": {
           "interval": [
-            {}
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
           ]
         }
       },
+      "id": "4225df4a-d97f-4ef0-a383-e858e0edb1f1",
+      "name": "1. Schedule Trigger",
       "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.4,
+      "typeVersion": 1.2,
       "position": [
         0,
         0
-      ],
-      "id": "7b5bbb2e-6296-440a-a565-497b8938b6a8",
-      "name": "Schedule Trigger"
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { execution_time: new Date().toISOString(), status: 'STARTED' } }];"
+      },
+      "id": "fcdcab3f-6663-4670-a41a-fc096743f13f",
+      "name": "2. Init Workflow Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT \n    t.id AS task_id, \n    t.title, \n    t.priority, \n    t.due_date, \n    m.full_name AS assignee\nFROM tasks t\nLEFT JOIN members m ON t.assignee_id = m.id\nWHERE t.status != 'DONE';",
+        "query": "SELECT id, name, deadline, status FROM projects WHERE status = 'ACTIVE' LIMIT 1;",
         "options": {}
       },
+      "id": "618ce7b9-8f37-4e04-97f1-1f53541098b2",
+      "name": "3. Fetch Active Project",
       "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.7,
+      "typeVersion": 2.5,
       "position": [
-        224,
+        448,
         0
       ],
-      "id": "dd0cb4b4-da3b-47bc-bf29-1bd53b0a4bd7",
-      "name": "Execute a SQL query",
       "credentials": {
         "postgres": {
           "id": "8h92NkUaOJ8thyTF",
@@ -41,17 +57,133 @@
     },
     {
       "parameters": {
-        "aggregate": "aggregateAllItemData",
-        "options": {}
+        "operation": "executeQuery",
+        "query": "SELECT t.id AS task_id, t.title, t.status, t.priority, t.story_points, t.due_date, m.full_name AS assignee_name FROM tasks t LEFT JOIN members m ON t.assignee_id = m.id WHERE t.project_id = $1 AND t.status IN ('TODO', 'IN_PROGRESS', 'IN_REVIEW');",
+        "options": {
+          "queryReplacement": "={{ $json.id }}"
+        }
       },
-      "type": "n8n-nodes-base.aggregate",
-      "typeVersion": 1,
+      "id": "565a3c43-409a-4aef-8203-1869dcfd3be7",
+      "name": "4. Fetch Pending Tasks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [
-        448,
+        672,
         0
       ],
-      "id": "f3932943-a4d6-4ec2-8c26-ea82707b4a0c",
-      "name": "Aggregate"
+      "credentials": {
+        "postgres": {
+          "id": "8h92NkUaOJ8thyTF",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, full_name, productivity_score, max_workload FROM members;",
+        "options": {}
+      },
+      "id": "82b1ee7c-7c40-474a-9e3d-162c75ce4904",
+      "name": "5. Fetch Members Metrics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "8h92NkUaOJ8thyTF",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $('4. Fetch Pending Tasks').all().map(i => i.json);\nconst members = $('5. Fetch Members Metrics').all().map(i => i.json);\nconst project =$('3. Fetch Active Project').first().json;\n\nlet totalStoryPoints = 0;\nlet urgentCount = 0;\n\nfor (const t of tasks) {\n  const points = Number(t.story_points);\n  totalStoryPoints += isNaN(points) ? 1 : points;\n  if (t.priority === 'URGENT' || t.priority === 'HIGH') {\n    urgentCount += 1;\n  }\n}\n\nreturn [{\n  json: {\n    project: project,\n    tasks: tasks,\n    members: members,\n    metrics: {\n      total_tasks: tasks.length,\n      total_story_points: totalStoryPoints,\n      urgent_tasks_count: urgentCount\n    }\n  }\n}];"
+      },
+      "id": "5d4c4ff8-7ffc-48d9-808f-29f375918b26",
+      "name": "6. Aggregate Project Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.item.json;\nconst currentTime = new Date().toISOString();\n\nconst prompt = `\nBạn là Trợ lý AI Chuyên gia Quản lý Dự án & Đánh giá Rủi ro (Risk Analysis Agent).\nThời gian hiện tại: ${currentTime}\n\nTHÔNG TIN DỰ ÁN:\nTên dự án: ${data.project.name}\nHạn chót dự án: ${data.project.deadline}\n\nTHỐNG KÊ KHỐI LƯỢNG CÔNG VIỆC:\n- Tổng số task chưa hoàn thành: ${data.metrics.total_tasks}\n- Tổng điểm Story Points: ${data.metrics.total_story_points}\n- Số lượng task ưu tiên cao/khẩn cấp: ${data.metrics.urgent_tasks_count}\n\nCHI TIẾT DANH SÁCH TASK:\n${JSON.stringify(data.tasks, null, 2)}\n\nNĂNG LỰC THÀNH VIÊN:\n${JSON.stringify(data.members, null, 2)}\n\nHãy phân tích kỹ năng, tiến độ, thời hạn deadline và khối lượng công việc để đưa ra đánh giá rủi ro trễ hạn.\n\nBẮT BUỘC TRẢ VỀ ĐỊNH DẠNG JSON THUẦN TÚY (không dùng markdown codeblock), với cấu trúc chính xác sau:\n{\n  \"risk_score\": <số thực từ 0 đến 100 biểu thị mức độ rủi ro trễ hạn>,\n  \"ai_summary\": \"<đánh giá chi tiết, chỉ ra các điểm nghẽn và nguyên nhân rủi ro>\"\n}\n`;\n\nreturn [{ json: { ai_prompt: prompt, project_id: data.project.id, metrics_json: data.metrics } }];"
+      },
+      "id": "f639766c-6fce-4974-baef-d8e3570289f2",
+      "name": "7. Build AI Prompt Structure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const itemJson = $input.item.json;\nlet rawText = '';\n\nif (itemJson.response) {\n  rawText = itemJson.response;\n} else if (itemJson.text) {\n  rawText = itemJson.text;\n}\n\nlet parsed = { risk_score: 50, ai_summary: 'Không thể trích xuất phản hồi từ AI.' };\n\ntry {\n  const cleanText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();\n  parsed = JSON.parse(cleanText);\n} catch (e) {\n  parsed.ai_summary = rawText;\n}\n\nconst promptNode = $('7. Build AI Prompt Structure').first().json;\n\nreturn [{\n  json: {\n    project_id: promptNode.project_id,\n    report_type: 'DEADLINE_RISK',\n    risk_score: parsed.risk_score,\n    ai_summary: parsed.ai_summary,\n    metrics: promptNode.metrics_json\n  }\n}];"
+      },
+      "id": "1269e9ba-107e-4802-91fb-cb7ae6532b40",
+      "name": "9. Extract & Parse AI Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1824,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\nif (item.risk_score < 0) item.risk_score = 0;\nif (item.risk_score > 100) item.risk_score = 100;\nreturn [{ json: item }];"
+      },
+      "id": "580af1c6-d078-4c3d-a52e-7a5655f28f45",
+      "name": "10. Validate Data Range",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO reports (project_id, report_type, risk_score, ai_summary, metrics) \nVALUES (\n  '{{ $json.project_id }}', \n  '{{ $json.report_type }}', \n  {{ $json.risk_score }}, \n  '{{ $json.ai_summary.replace(/'/g, \"''\") }}', \n  '{{ JSON.stringify($json.metrics) }}'::jsonb\n) \nRETURNING id;",
+        "options": {}
+      },
+      "id": "9be3b418-6770-45e1-a266-305b0ccd4cf2",
+      "name": "11. Save Report to Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2208,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "8h92NkUaOJ8thyTF",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status: 'SUCCESS', report_id: $input.item.json.id, message: 'Luồng 12 bước hoàn thành thành công!' } }];"
+      },
+      "id": "f3ff160d-c933-4848-b522-4219745d49e2",
+      "name": "12. Finalize & Log Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        0
+      ]
     },
     {
       "parameters": {
@@ -63,7 +195,7 @@
         "messages": {
           "values": [
             {
-              "content": "=Bạn là chuyên gia quản lý rủi ro. Dưới đây là danh sách các công việc chưa hoàn thành:\n{{ $json.data }}\n\nHãy phân tích và đánh giá mức độ rủi ro chung của toàn bộ danh sách này (lưu ý các task trễ hạn, độ ưu tiên HIGH/URGENT).\nBẮT BUỘC trả về kết quả CHỈ bằng một chuỗi JSON có định dạng sau (không giải thích thêm):\n{\n  \"risk_score\": 75,\n  \"ai_summary\": \"Điền 1 câu cảnh báo ngắn gọn về các công việc nguy hiểm nhất vào đây\"\n}"
+              "content": "={{ $('7. Build AI Prompt Structure').item.json.ai_prompt }}"
             }
           ]
         },
@@ -73,10 +205,10 @@
       "type": "@n8n/n8n-nodes-langchain.googleGemini",
       "typeVersion": 1.2,
       "position": [
-        672,
+        1552,
         0
       ],
-      "id": "ce95f136-341d-44fd-85b8-36716f8a2714",
+      "id": "3c16fb24-5a7f-4396-83ef-03e26c9af006",
       "name": "Message a model",
       "credentials": {
         "googlePalmApi": {
@@ -84,54 +216,77 @@
           "name": "Google Gemini(PaLM) Api account"
         }
       }
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "INSERT INTO reports (project_id, report_type, risk_score, ai_summary)\nVALUES (\n    'a0000001-0000-0000-0000-000000000001', \n    'DEADLINE_RISK', \n    {{ JSON.parse($json.content.parts[0].text).risk_score }}, \n    $${{ JSON.parse($json.content.parts[0].text).ai_summary }}$$\n);",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.7,
-      "position": [
-        1008,
-        0
-      ],
-      "id": "80e2fc08-3fff-44c2-83ba-71f31f25885f",
-      "name": "Execute a SQL query1",
-      "credentials": {
-        "postgres": {
-          "id": "8h92NkUaOJ8thyTF",
-          "name": "Postgres account"
-        }
-      }
     }
   ],
   "pinData": {},
   "connections": {
-    "Schedule Trigger": {
+    "1. Schedule Trigger": {
       "main": [
         [
           {
-            "node": "Execute a SQL query",
+            "node": "2. Init Workflow Context",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Execute a SQL query": {
+    "2. Init Workflow Context": {
       "main": [
         [
           {
-            "node": "Aggregate",
+            "node": "3. Fetch Active Project",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Aggregate": {
+    "3. Fetch Active Project": {
+      "main": [
+        [
+          {
+            "node": "4. Fetch Pending Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Fetch Pending Tasks": {
+      "main": [
+        [
+          {
+            "node": "5. Fetch Members Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Fetch Members Metrics": {
+      "main": [
+        [
+          {
+            "node": "6. Aggregate Project Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Aggregate Project Metrics": {
+      "main": [
+        [
+          {
+            "node": "7. Build AI Prompt Structure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7. Build AI Prompt Structure": {
       "main": [
         [
           {
@@ -142,11 +297,44 @@
         ]
       ]
     },
+    "9. Extract & Parse AI Output": {
+      "main": [
+        [
+          {
+            "node": "10. Validate Data Range",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10. Validate Data Range": {
+      "main": [
+        [
+          {
+            "node": "11. Save Report to Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11. Save Report to Database": {
+      "main": [
+        [
+          {
+            "node": "12. Finalize & Log Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Message a model": {
       "main": [
         [
           {
-            "node": "Execute a SQL query1",
+            "node": "9. Extract & Parse AI Output",
             "type": "main",
             "index": 0
           }
@@ -159,12 +347,12 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "118a775a-cb97-4135-8019-d63a23de6803",
+  "versionId": "df65bbe5-a155-4d32-a696-7b887653e285",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "ba2ff6236c53cc3094a25409901a5f23d54d6d0427ae4975062e6154d2291e5f"
   },
   "nodeGroups": [],
-  "id": "b9OoGvfUVYgy8pSe",
+  "id": "PHxgtCjOci91Oy6m",
   "tags": []
 }
