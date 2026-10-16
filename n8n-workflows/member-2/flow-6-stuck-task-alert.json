@@ -1,0 +1,399 @@
+{
+  "name": "Flow 6 - Stuck Task Alert (Cron)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "b2000001-0002-4000-8000-000000000001",
+      "name": "Schedule - Every 2 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================\n// NUT 2: CAU HINH NGUONG PHAT HIEN TASK BI KET\n// =====================================================\nreturn [{\n  json: {\n    stuck_threshold_hours:    24,   // Task bi coi la \"ket\" sau 24 gio khong cap nhat\n    critical_threshold_hours: 48,   // Task bi coi la \"nguy hiem\" sau 48 gio\n    watch_threshold_hours:    12,   // Task can theo doi sau 12 gio\n    statuses_to_check:        ['IN_PROGRESS', 'IN_REVIEW'],\n    default_project_id:       'a0000001-0000-0000-0000-000000000001',\n    checked_at:               new Date().toISOString(),\n    flow_version:             'flow6_v1'\n  }\n}];"
+      },
+      "id": "b2000001-0002-4000-8000-000000000002",
+      "name": "Code - Set Alert Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  t.id,\n  t.title,\n  t.status,\n  t.assignee_id,\n  t.project_id,\n  t.due_date,\n  t.story_points,\n  t.updated_at,\n  t.is_bottleneck,\n  ROUND(EXTRACT(EPOCH FROM (NOW() - t.updated_at)) / 3600, 2) AS hours_since_update,\n  m.full_name  AS assignee_name,\n  m.email      AS assignee_email,\n  m.telegram_id AS assignee_telegram,\n  p.name       AS project_name,\n  p.deadline   AS project_deadline\nFROM tasks t\nLEFT JOIN members  m ON t.assignee_id = m.id\nLEFT JOIN projects p ON t.project_id  = p.id\nWHERE t.status IN ('IN_PROGRESS', 'IN_REVIEW')\n  AND t.updated_at < NOW() - INTERVAL '{{ $json.stuck_threshold_hours }} hours'\nORDER BY t.updated_at ASC;",
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "id": "b2000001-0002-4000-8000-000000000003",
+      "name": "Postgres - Query Stuck Tasks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================\n// NUT 4: TONG HOP KET QUA VA PHAN LOAI MUC DO\n// =====================================================\nconst allItems = $input.all();\nconst config   = $('Code - Set Alert Config').first().json;\n\n// Loc ra cac dong co du lieu hop le tu Postgres\nconst tasks = allItems\n  .filter(item => item.json && item.json.id)\n  .map(item => ({\n    ...item.json,\n    hours_since_update: parseFloat(item.json.hours_since_update || 0)\n  }));\n\nif (tasks.length === 0) {\n  return [{\n    json: {\n      has_stuck_tasks:  false,\n      stuck_count:      0,\n      critical_count:   0,\n      warning_count:    0,\n      watch_count:      0,\n      risk_score:       0,\n      tasks:            [],\n      critical_tasks:   [],\n      warning_tasks:    [],\n      first_project_id: config.default_project_id,\n      checked_at:       config.checked_at\n    }\n  }];\n}\n\n// Phan loai theo muc do\nconst critical = tasks.filter(t => t.hours_since_update >= config.critical_threshold_hours);\nconst warning  = tasks.filter(t => t.hours_since_update >= config.stuck_threshold_hours && t.hours_since_update < config.critical_threshold_hours);\nconst watch    = tasks.filter(t => t.hours_since_update >= config.watch_threshold_hours && t.hours_since_update < config.stuck_threshold_hours);\n\n// Tinh diem rui ro (0-100)\nconst riskScore = Math.min(100, Math.round(\n  critical.length * 30 + warning.length * 15 + watch.length * 5\n));\n\nreturn [{\n  json: {\n    has_stuck_tasks:  true,\n    stuck_count:      tasks.length,\n    critical_count:   critical.length,\n    warning_count:    warning.length,\n    watch_count:      watch.length,\n    risk_score:       riskScore,\n    tasks:            tasks,\n    critical_tasks:   critical,\n    warning_tasks:    warning,\n    task_ids:         tasks.map(t => t.id),\n    first_project_id: tasks[0].project_id || config.default_project_id,\n    checked_at:       config.checked_at\n  }\n}];"
+      },
+      "id": "b2000001-0002-4000-8000-000000000004",
+      "name": "Code - Aggregate and Classify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-stuck-01",
+              "leftValue": "={{ $json.has_stuck_tasks }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2000001-0002-4000-8000-000000000005",
+      "name": "IF - Any Stuck Tasks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================\n// NUT 6: LOG KHI KHONG CO TASK BI KET (ALL CLEAR)\n// =====================================================\nconst config = $('Code - Set Alert Config').first().json;\n\nreturn [{\n  json: {\n    all_clear:    true,\n    message:      'Tat ca task dang hoat dong binh thuong. Khong phat hien task bi ket qua ' + config.stuck_threshold_hours + ' gio.',\n    checked_at:   config.checked_at,\n    flow:         'flow6-stuck-task-alert',\n    risk_score:   0\n  }\n}];"
+      },
+      "id": "b2000001-0002-4000-8000-000000000006",
+      "name": "Code - Log No Issues Found",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tasks\nSET\n  is_bottleneck = true,\n  updated_at    = NOW()\nWHERE status IN ('IN_PROGRESS', 'IN_REVIEW')\n  AND updated_at < NOW() - INTERVAL '{{ $('Code - Set Alert Config').first().json.stuck_threshold_hours }} hours'\n  AND is_bottleneck = false\nRETURNING id, title, status, is_bottleneck, updated_at;",
+        "options": {}
+      },
+      "id": "b2000001-0002-4000-8000-000000000007",
+      "name": "Postgres - Mark Bottleneck Flag",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO task_logs (task_id, changed_by, old_status, new_status, comment)\nSELECT\n  id,\n  NULL,\n  status,\n  status,\n  'STUCK ALERT (Flow 6): Task bi ket ' ||\n    ROUND(EXTRACT(EPOCH FROM (NOW() - updated_at)) / 3600)::INT ||\n    ' gio. Auto-detected by n8n Cron Flow 6.'\nFROM tasks\nWHERE status IN ('IN_PROGRESS', 'IN_REVIEW')\n  AND updated_at < NOW() - INTERVAL '{{ $('Code - Set Alert Config').first().json.stuck_threshold_hours }} hours'\nRETURNING id, task_id, new_status, comment, logged_at;",
+        "options": {}
+      },
+      "id": "b2000001-0002-4000-8000-000000000008",
+      "name": "Postgres - Insert Detection Logs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO activity_history\n  (task_id, member_id, action_type, old_value, new_value, metadata)\nSELECT\n  t.id,\n  t.assignee_id,\n  'STUCK_DETECTED',\n  t.status,\n  'BLOCKED',\n  '{\"source\": \"n8n_flow6_cron\", \"alert_type\": \"stuck_task_auto_detect\"}'\nFROM tasks t\nWHERE t.status IN ('IN_PROGRESS', 'IN_REVIEW')\n  AND t.updated_at < NOW() - INTERVAL '{{ $('Code - Set Alert Config').first().json.stuck_threshold_hours }} hours'\nRETURNING id, task_id, action_type, created_at;",
+        "options": {}
+      },
+      "id": "b2000001-0002-4000-8000-000000000009",
+      "name": "Postgres - Insert Activity History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1750,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================\n// NUT 10: CHUAN BI DU LIEU BAO CAO\n// =====================================================\nconst data   = $('Code - Aggregate and Classify').first().json;\nconst config = $('Code - Set Alert Config').first().json;\n\n// Tao danh sach task bi ket (loai bo ky tu dac biet de tranh loi SQL)\nconst cleanTitle = (str) => (str || 'Khong ro').replace(/['\"\\\\]/g, '');\n\nconst stuckList = data.tasks.slice(0, 8).map(t =>\n  '- ' + cleanTitle(t.assignee_name || 'Chua phan cong') +\n  ': [' + t.status + '] ' + cleanTitle(t.title) +\n  ' (bi ket ' + Math.round(t.hours_since_update) + 'h)'\n).join(' | ');\n\nconst summaryText =\n  'Flow6 Stuck Alert - Ket qua quet luc ' + data.checked_at +\n  ' | Tong task bi ket: ' + data.stuck_count +\n  ' | CRITICAL(>48h): ' + data.critical_count +\n  ' | WARNING(24-48h): ' + data.warning_count +\n  ' | Diem rui ro: ' + data.risk_score + '/100' +\n  (stuckList ? ' | Chi tiet: ' + stuckList : '');\n\nreturn [{\n  json: {\n    ...data,\n    ai_summary: summaryText,\n    metrics: {\n      stuck_count:    data.stuck_count,\n      critical_count: data.critical_count,\n      warning_count:  data.warning_count,\n      watch_count:    data.watch_count,\n      risk_score:     data.risk_score,\n      checked_at:     data.checked_at,\n      flow:           'flow6_stuck_task_alert'\n    }\n  }\n}];"
+      },
+      "id": "b2000001-0002-4000-8000-000000000010",
+      "name": "Code - Prepare Report Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-critical-01",
+              "leftValue": "={{ $json.critical_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2000001-0002-4000-8000-000000000011",
+      "name": "IF - Has Critical Tasks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================\n// NUT 12: FORMAT CANH BAO NGHIEM TRONG (CRITICAL)\n// =====================================================\nconst data   = $input.first().json;\nconst config = $('Code - Set Alert Config').first().json;\n\nconst cleanTitle = (str) => (str || 'N/A').replace(/['\"\\\\]/g, '');\n\nconst criticalDetail = data.critical_tasks.slice(0, 5).map(t =>\n  'CRITICAL | ' + cleanTitle(t.assignee_name || 'Chua phan cong') +\n  ' | ' + cleanTitle(t.title) +\n  ' | Bi ket: ' + Math.round(t.hours_since_update) + 'h' +\n  ' | Du an: ' + cleanTitle(t.project_name || 'N/A')\n).join(' ;; ');\n\nreturn [{\n  json: {\n    alert_level:      'CRITICAL',\n    alert_message:    'CANH BAO NGHIEM TRONG: Co ' + data.critical_count +\n                      ' task bi ket qua ' + config.critical_threshold_hours + ' gio!',\n    risk_score:       data.risk_score,\n    ai_summary:       data.ai_summary + ' [ALERT: CRITICAL tasks: ' + criticalDetail + ']',\n    metrics:          data.metrics,\n    first_project_id: data.first_project_id,\n    stuck_count:      data.stuck_count,\n    processed_at:     new Date().toISOString()\n  }\n}];"
+      },
+      "id": "b2000001-0002-4000-8000-000000000012",
+      "name": "Code - Format Critical Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2500,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================\n// NUT 13: FORMAT CANH BAO CHUAN (WARNING)\n// =====================================================\nconst data   = $input.first().json;\nconst config = $('Code - Set Alert Config').first().json;\n\nreturn [{\n  json: {\n    alert_level:      'WARNING',\n    alert_message:    'CANH BAO: Co ' + data.stuck_count +\n                      ' task chua duoc cap nhat qua ' + config.stuck_threshold_hours + ' gio. Kiem tra tien do!',\n    risk_score:       data.risk_score,\n    ai_summary:       data.ai_summary,\n    metrics:          data.metrics,\n    first_project_id: data.first_project_id,\n    stuck_count:      data.stuck_count,\n    processed_at:     new Date().toISOString()\n  }\n}];"
+      },
+      "id": "b2000001-0002-4000-8000-000000000013",
+      "name": "Code - Format Warning Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2500,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO reports\n  (project_id, report_type, risk_score, ai_summary, metrics)\nVALUES (\n  '{{ $json.first_project_id }}',\n  'STUCK_TASK_ALERT',\n  {{ $json.risk_score }},\n  '{{ $json.alert_level + \": \" + $json.alert_message }}',\n  '{{ JSON.stringify($json.metrics) }}'\n)\nRETURNING *;",
+        "options": {}
+      },
+      "id": "b2000001-0002-4000-8000-000000000014",
+      "name": "Postgres - Save Alert Report",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2750,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule - Every 2 Hours": {
+      "main": [
+        [
+          {
+            "node": "Code - Set Alert Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Set Alert Config": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Query Stuck Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Query Stuck Tasks": {
+      "main": [
+        [
+          {
+            "node": "Code - Aggregate and Classify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Aggregate and Classify": {
+      "main": [
+        [
+          {
+            "node": "IF - Any Stuck Tasks?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Any Stuck Tasks?": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Mark Bottleneck Flag",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Log No Issues Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Mark Bottleneck Flag": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Insert Detection Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Insert Detection Logs": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Insert Activity History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Insert Activity History": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Report Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Report Data": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Critical Tasks?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Critical Tasks?": {
+      "main": [
+        [
+          {
+            "node": "Code - Format Critical Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Format Warning Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Format Critical Alert": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Save Alert Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Format Warning Alert": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Save Alert Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "versionId": "1"
+}
