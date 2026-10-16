@@ -5,73 +5,381 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "skill-matching",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {}
       },
+      "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
+      "webhookId": "79bc03a6-4bcc-494b-ba86-3cb8c5fb0e65",
+      "id": "e148ad0a-46b0-49bc-8520-a509b6b34f74",
       "position": [
         0,
         0
-      ],
-      "id": "51f8c143-4c23-48f7-a4cb-41e3fc31a530",
-      "name": "Webhook",
-      "webhookId": "f21b9009-97b4-4086-a69c-d17d5af1aa52"
+      ]
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT \n  t.id AS task_id, \n  t.title AS task_title, \n  t.required_skills,\n  m.id AS member_id, \n  m.full_name AS member_name, \n  m.skills AS member_skills\nFROM tasks t\nCROSS JOIN members m\nWHERE t.assignee_id IS NULL AND array_length(t.required_skills, 1) > 0;",
-        "options": {}
+        "jsCode": "const b = $input.first().json.body || {};\n    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n    const mail = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;\n    const pid = uuid.test(b.project_id || '') ? b.project_id : null;\n    const filter = pid ? \"AND project_id = '\" + pid + \"'::uuid \" : '';\n    const sql_tasks = 'SELECT id,title,required_skills,project_id FROM tasks WHERE assignee_id IS NULL ' + filter +\n      \"AND status <> 'DONE' AND array_length(required_skills,1) > 0 ORDER BY created_at\";\n    const min = Number(b.min_score);\n    return [{ json: {\n      sql_tasks,\n      min_score: isFinite(min) && min >= 0 && min <= 100 ? min : 40,\n      notify_email: mail.test(b.notify_email || '') ? b.notify_email : 'htchannelas@gmail.com',\n    } }];"
       },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.7,
-      "position": [
-        224,
-        0
-      ],
-      "id": "fc247b95-1cde-45b4-b252-ef0eadef71b5",
-      "name": "Execute a SQL query",
-      "credentials": {
-        "postgres": {
-          "id": "GtFHLYZn1QvEQSpk",
-          "name": "Postgres account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const items = $input.all();\nif (items.length === 0) return [];\n\n// Gom nhóm theo từng task_id và tính điểm match %\nconst taskMap = {};\n\nfor (const item of items) {\n  const data = item.json;\n  const taskId = data.task_id;\n  const required = data.required_skills || [];\n  const memberSkills = data.member_skills || [];\n\n  // Đếm số kỹ năng trùng nhau giữa Task và Member\n  const matched = required.filter(rSkill => \n    memberSkills.some(mSkill => mSkill.toLowerCase().trim() === rSkill.toLowerCase().trim())\n  );\n\n  // Tính điểm Match Score %\n  const score = required.length > 0 ? (matched.length / required.length) * 100 : 0;\n\n  if (!taskMap[taskId]) {\n    taskMap[taskId] = {\n      task_id: taskId,\n      task_title: data.task_title,\n      best_member_id: data.member_id,\n      best_member_name: data.member_name,\n      best_score: score\n    };\n  } else if (score > taskMap[taskId].best_score) {\n    taskMap[taskId].best_member_id = data.member_id;\n    taskMap[taskId].best_member_name = data.member_name;\n    taskMap[taskId].best_score = score;\n  }\n}\n\nreturn Object.values(taskMap).map(res => ({ json: res }));"
-      },
+      "name": "Prepare Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
+      "id": "7097539a-f0d3-47a1-a651-761c7ce59010",
       "position": [
-        448,
+        272,
         0
-      ],
-      "id": "4adab5e7-d898-4266-b2d4-c18ba61eb039",
-      "name": "Code in JavaScript"
+      ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE tasks \nSET assignee_id = '{{ $json.best_member_id }}', updated_at = CURRENT_TIMESTAMP\nWHERE id = '{{ $json.task_id }}'\nRETURNING id, title, assignee_id;",
+        "query": "{{ $json.sql_tasks }}",
         "options": {}
       },
+      "name": "Get Candidate Tasks",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "d73c3335-ea0f-4496-9cf2-7f6b1011441b",
       "position": [
-        672,
+        528,
         0
       ],
-      "id": "8aca4252-0148-4e39-9505-1428f5994456",
-      "name": "Execute a SQL query1",
       "credentials": {
         "postgres": {
           "id": "GtFHLYZn1QvEQSpk",
           "name": "Postgres account"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $input.all().map((i) => i.json).filter((t) => t.id);\n    return [{ json: { tasks, count: tasks.length } }];"
+      },
+      "name": "Collect Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "4b651e68-b9e7-48da-a73c-43a121b3bf75",
+      "position": [
+        784,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "924e0599-7b5b-44ad-93fb-e49356cecd2a",
+              "leftValue": "={{ $json.count > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has Tasks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "id": "e54875f6-0cb1-4e8d-a189-9457170d7106",
+      "position": [
+        1040,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, matched_count: 0, message: 'Không có task nào cần khớp kỹ năng' }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Respond No Tasks",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "id": "2baee31d-52ae-468a-9a31-3ccdff9d206e",
+      "position": [
+        1312,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.id, m.full_name, m.max_workload, m.skills, COALESCE(m.productivity_score,100)::float AS productivity_score, COUNT(t.id) FILTER (WHERE t.status IN ('TODO','IN_PROGRESS','IN_REVIEW'))::int AS current_load FROM members m LEFT JOIN tasks t ON t.assignee_id = m.id GROUP BY m.id ORDER BY m.full_name",
+        "options": {}
+      },
+      "name": "Get Members With Load",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "dd53b826-9a71-4d68-8c2c-8bf769974dd4",
+      "position": [
+        1312,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $('Collect Tasks').first().json.tasks;\n    const min = $('Prepare Input').first().json.min_score;\n    const members = $input.all().map((i) => i.json).filter((m) => m.id)\n      .map((m) => Object.assign({}, m, { load: Number(m.current_load), max: Number(m.max_workload) }));\n    const norm = (s) => String(s).toLowerCase().trim();\n    const r1 = (x) => Math.round(x * 10) / 10;\n    const out = [];\n    for (const t of tasks) {\n      const req = (t.required_skills || []).map(norm);\n      const ranking = members.map((m) => {\n        const ms = (m.skills || []).map(norm);\n        const matched = req.filter((r) => ms.some((s) => s === r || s.includes(r) || r.includes(s)));\n        const skill = req.length ? (matched.length / req.length) * 100 : 0;\n        const loadScore = m.max > 0 ? Math.max(0, 1 - m.load / m.max) * 100 : 0;\n        const prod = Math.min(100, Number(m.productivity_score) || 0);\n        return {\n          member_id: m.id, member_name: m.full_name, matched,\n          skill: r1(skill), load_score: r1(loadScore), productivity: r1(prod),\n          total: r1(skill * 0.6 + loadScore * 0.25 + prod * 0.15),\n          has_capacity: m.load < m.max,\n        };\n      }).filter((r) => r.has_capacity).sort((a, b) => b.total - a.total);\n      const best = ranking[0] || null;\n      const qualified = !!best && best.skill > 0 && best.total >= min;\n      if (qualified) members.find((m) => m.id === best.member_id).load++;\n      out.push({ json: {\n        task_id: t.id, title: t.title, project_id: t.project_id, required_skills: t.required_skills,\n        qualified, best, top3: ranking.slice(0, 3),\n        sql: qualified\n          ? \"UPDATE tasks SET assignee_id = '\" + best.member_id + \"'::uuid, updated_at = CURRENT_TIMESTAMP WHERE id = '\" + t.id + \"'::uuid RETURNING id, title, assignee_id\"\n          : 'SELECT 1 AS skipped',\n      } });\n    }\n    return out;"
+      },
+      "name": "Score Matching",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "10fa62e4-a806-40be-a928-5d4687ce8cca",
+      "position": [
+        1568,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "afd985b8-dad6-464c-bb26-43e6ee99ed72",
+              "leftValue": "={{ $json.qualified }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Qualified?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "id": "24755c00-8a6f-4e7d-9e2a-10114191b0d0",
+      "position": [
+        1824,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "name": "Update Assignee",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "49e840dc-4110-4ae8-b76b-e3310e8ede69",
+      "position": [
+        2080,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "acd30bc7-ae7c-435a-bfce-b94645bd6a7b",
+              "name": "review_note",
+              "value": "Không có thành viên đủ điểm phù hợp - cần PM review thủ công",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "name": "Set Needs Review",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "id": "88451254-a51e-40d3-936c-696f2069f048",
+      "position": [
+        2080,
+        224
+      ]
+    },
+    {
+      "parameters": {},
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "id": "f36dc657-7edb-4e28-93cb-52d08896cec3",
+      "position": [
+        2352,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "id": "7cb12c64-ff2f-408f-ad7a-9bdd9cb13ff9",
+      "position": [
+        2608,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rs = $('Score Matching').all().map((i) => i.json);\n    const lines = rs.map((r) => '- ' + r.title + ' | yêu cầu: ' + (r.required_skills || []).join(', ') + ' | ' +\n      (r.qualified\n        ? 'GÁN CHO ' + r.best.member_name + ' (skill ' + r.best.skill + '%, tải ' + r.best.load_score + ', năng suất ' + r.best.productivity + ', tổng ' + r.best.total + ')'\n        : 'CHƯA GÁN (cần review)')).join('\\n');\n    const prompt = 'Bạn là PM. Dưới đây là kết quả tự động khớp kỹ năng cho các task:\\n' + lines +\n      '\\n\\nViết nhận xét ngắn gọn bằng tiếng Việt (tối đa 120 từ) giải thích vì sao các task được gán như vậy và nêu rủi ro nếu có. Không dùng markdown.';\n    return [{ json: { prompt } }];"
+      },
+      "name": "Build Explain Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "1d051bf7-601f-448b-8a4d-da0d334e77f7",
+      "position": [
+        2864,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-3-flash-preview"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.prompt }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "name": "Gemini Explain",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "id": "137c2651-ad62-4cd9-a59e-53e862f8d79e",
+      "position": [
+        3120,
+        0
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "uqlXl6EjKaHi9rT5",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rs = $('Score Matching').all().map((i) => i.json);\n    const email = $('Prepare Input').first().json.notify_email;\n    let explain;\n    try { explain = $input.first().json.content.parts[0].text; } catch (e) { explain = '(AI không trả về giải thích)'; }\n    const q = (s) => \"'\" + String(s ?? '').replace(/'/g, \"''\") + \"'\";\n    const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));\n    const assigned = rs.filter((r) => r.qualified).length;\n    const review = rs.length - assigned;\n    const metrics = { total: rs.length, assigned, needs_review: review };\n    const sql = 'INSERT INTO reports (project_id, report_type, risk_score, ai_summary, metrics) VALUES (' +\n      q(rs[0].project_id) + \"::uuid, 'SKILL_MATCHING', \" + (rs.length ? (review / rs.length * 100).toFixed(2) : 0) + ', ' +\n      q(explain) + ', ' + q(JSON.stringify(metrics)) + '::jsonb) RETURNING id';\n    const rows = rs.map((r) => '<tr><td>' + esc(r.title) + '</td><td>' + (r.qualified ? esc(r.best.member_name) + ' (' + r.best.total + ')' : '⚠️ cần review') + '</td></tr>').join('');\n    const html = '<h2>🎯 Skill Matrix Matching</h2><p>Gán: <b>' + assigned + '</b> | Cần review: <b>' + review + '</b></p>' +\n      '<table border=\"1\" cellpadding=\"6\" style=\"border-collapse:collapse\"><tr><th>Task</th><th>Kết quả</th></tr>' + rows + '</table>' +\n      '<h3>Nhận xét AI</h3><p>' + esc(explain) + '</p>';\n    return [{ json: {\n      sql, notify_email: email,\n      subject: '🎯 [Luồng 3] Khớp kỹ năng: ' + assigned + ' gán, ' + review + ' cần review',\n      html,\n      response: { success: true, ...metrics, ai_summary: explain,\n        results: rs.map((r) => ({ task: r.title, qualified: r.qualified, assignee: r.best ? r.best.member_name : null, score: r.best ? r.best.total : null })) },\n    } }];"
+      },
+      "name": "Build Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "fee716f5-57a2-4533-9a5f-42e2f631a512",
+      "position": [
+        3392,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "name": "Save Report",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "79c2c15b-8c11-4ab1-841e-2e0badbd105c",
+      "position": [
+        3648,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Build Report').first().json.notify_email }}",
+        "subject": "={{ $('Build Report').first().json.subject }}",
+        "message": "={{ $('Build Report').first().json.html }}",
+        "options": {}
+      },
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "id": "0632c328-a76b-455b-b28a-8bb42e54d929",
+      "position": [
+        3904,
+        0
+      ],
+      "webhookId": "1654eb5a-d6f1-46bd-a71f-a87b7964dcd6",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "0UtX1cQWu7PvgpLf",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Build Report').first().json.response) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "id": "7cf06522-6369-4a8e-b717-c8025a60a849",
+      "position": [
+        4160,
+        0
+      ]
     }
   ],
   "pinData": {
@@ -79,7 +387,9 @@
       {
         "json": {
           "body": {
-            "trigger": "match_skills"
+            "project_id": "a0000001-0000-0000-0000-000000000001",
+            "min_score": 40,
+            "notify_email": "htchannelas@gmail.com"
           }
         }
       }
@@ -90,29 +400,197 @@
       "main": [
         [
           {
-            "node": "Execute a SQL query",
+            "node": "Prepare Input",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Execute a SQL query": {
+    "Prepare Input": {
       "main": [
         [
           {
-            "node": "Code in JavaScript",
+            "node": "Get Candidate Tasks",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Code in JavaScript": {
+    "Get Candidate Tasks": {
       "main": [
         [
           {
-            "node": "Execute a SQL query1",
+            "node": "Collect Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Tasks": {
+      "main": [
+        [
+          {
+            "node": "Has Tasks?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Tasks?": {
+      "main": [
+        [
+          {
+            "node": "Get Members With Load",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond No Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Members With Load": {
+      "main": [
+        [
+          {
+            "node": "Score Matching",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Matching": {
+      "main": [
+        [
+          {
+            "node": "Qualified?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualified?": {
+      "main": [
+        [
+          {
+            "node": "Update Assignee",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Needs Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Assignee": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Needs Review": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Results": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Results": {
+      "main": [
+        [
+          {
+            "node": "Build Explain Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Explain Prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini Explain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Explain": {
+      "main": [
+        [
+          {
+            "node": "Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Report": {
+      "main": [
+        [
+          {
+            "node": "Save Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Report": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Gmail": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
             "type": "main",
             "index": 0
           }
@@ -125,12 +603,12 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "7b56e887-cd83-4fec-960a-3b6eac91a20d",
+  "versionId": "439c627c-56c9-4b1b-8f65-fdf967a7b952",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "33515e9d621b9af39628b241f4fb5fb52353580cedd8c7947d66ef61b2ad0564"
   },
   "nodeGroups": [],
-  "id": "PHXuo46gdJzvAx3S",
+  "id": "kbvS5z8qgXI4GyBC",
   "tags": []
 }

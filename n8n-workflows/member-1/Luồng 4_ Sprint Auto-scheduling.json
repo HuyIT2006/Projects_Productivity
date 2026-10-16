@@ -5,73 +5,354 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "sprint-auto-schedule",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {}
       },
+      "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
+      "webhookId": "de56c1dc-6414-45db-b3f6-9fb3005b065c",
+      "id": "2cdb3332-7589-4d22-a664-d89ec9d799f9",
       "position": [
         0,
         0
-      ],
-      "id": "fafc8221-8feb-4595-a6a2-7fb48617e7e8",
-      "name": "Webhook",
-      "webhookId": "35cf35fb-d7c4-45cd-a31d-856d413e45aa"
+      ]
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT \n  t.id AS task_id, \n  t.title, \n  t.story_points, \n  t.priority,\n  COALESCE(m.productivity_score, 100.00) AS productivity_score,\n  p.start_date AS project_start_date\nFROM tasks t\nJOIN projects p ON p.id = t.project_id\nLEFT JOIN members m ON m.id = t.assignee_id\nWHERE t.project_id = '{{ $json.body.project_id }}'\nORDER BY \n  CASE t.priority\n    WHEN 'URGENT' THEN 1\n    WHEN 'HIGH' THEN 2\n    WHEN 'MEDIUM' THEN 3\n    WHEN 'LOW' THEN 4\n    ELSE 5\n  END ASC,\n  t.created_at ASC;",
-        "options": {}
+        "jsCode": "const b = $input.first().json.body || {};\n    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n    const mail = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;\n    const ppd = Number(b.points_per_day);\n    return [{ json: {\n      project_id: uuid.test(b.project_id || '') ? b.project_id : 'a0000001-0000-0000-0000-000000000001',\n      start_date: /^\\d{4}-\\d{2}-\\d{2}$/.test(b.start_date || '') ? b.start_date : null,\n      points_per_day: isFinite(ppd) && ppd > 0 ? ppd : 2,\n      notify_email: mail.test(b.notify_email || '') ? b.notify_email : 'htchannelas@gmail.com',\n    } }];"
       },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.7,
-      "position": [
-        224,
-        0
-      ],
-      "id": "fc7a04b7-ca99-46fd-9afd-e4dbd22b3722",
-      "name": "Execute a SQL query",
-      "credentials": {
-        "postgres": {
-          "id": "GtFHLYZn1QvEQSpk",
-          "name": "Postgres account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const items = $input.all();\nif (items.length === 0) return [];\n\n// Lấy ngày bắt đầu dự án hoặc mốc thời gian hiện tại\nlet currentDate = new Date(items[0].json.project_start_date || Date.now());\n\nconst results = [];\n\nfor (const item of items) {\n  const data = item.json;\n  const storyPoints = data.story_points || 1;\n  const productivity = parseFloat(data.productivity_score) || 100;\n\n  // Tính số ngày cần hoàn thành task (giả định 1 member làm được 2 points/ngày)\n  const daysNeeded = Math.max(1, Math.ceil(storyPoints / ((productivity / 100) * 2)));\n\n  // Tịnh tiến ngày due_date tiếp theo\n  currentDate.setDate(currentDate.getDate() + daysNeeded);\n\n  results.push({\n    json: {\n      task_id: data.task_id,\n      title: data.title,\n      calculated_days: daysNeeded,\n      due_date: currentDate.toISOString()\n    }\n  });\n}\n\nreturn results;"
-      },
+      "name": "Prepare Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
+      "id": "efc516f3-1fda-407d-9519-92afdbb5ecfa",
       "position": [
-        448,
+        272,
         0
-      ],
-      "id": "0b1226ad-62e9-47ba-9713-9359ecc4db15",
-      "name": "Code in JavaScript"
+      ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE tasks \nSET due_date = '{{ $json.due_date }}'::timestamptz, updated_at = CURRENT_TIMESTAMP\nWHERE id = '{{ $json.task_id }}'\nRETURNING id, title, due_date;",
+        "query": "SELECT id, name, start_date::text AS start_date, deadline::text AS deadline FROM projects WHERE id = '{{ $json.project_id }}'::uuid",
         "options": {}
       },
+      "name": "Get Project",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "ef0b7d2d-4395-4c97-8f73-437aa40c0da9",
       "position": [
-        672,
+        528,
         0
       ],
-      "id": "0e8a30e6-7382-45e9-80ae-00087e3c9150",
-      "name": "Execute a SQL query1",
       "credentials": {
         "postgres": {
           "id": "GtFHLYZn1QvEQSpk",
           "name": "Postgres account"
         }
       }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "be51c64e-4166-4a6f-8e74-a094e020622d",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Project Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "id": "ccd66996-a0a9-46e4-ae90-a05a9188916f",
+      "position": [
+        784,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: 'Không tìm thấy dự án' }) }}",
+        "options": {
+          "responseCode": 404
+        }
+      },
+      "name": "Respond 404",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "id": "1a0c2787-6fbc-4a5a-82bf-ca36dff178a2",
+      "position": [
+        1040,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT t.id, t.title, t.story_points, t.priority, t.assignee_id, m.full_name AS assignee_name, COALESCE(m.productivity_score,100)::float AS productivity_score FROM tasks t LEFT JOIN members m ON m.id = t.assignee_id WHERE t.project_id = '{{ $('Prepare Input').first().json.project_id }}'::uuid AND t.status <> 'DONE' ORDER BY CASE t.priority WHEN 'URGENT' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END, t.created_at",
+        "options": {}
+      },
+      "name": "Get Sprint Tasks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "050686bc-3f41-4a4a-ad4d-2d27e7daaaaa",
+      "position": [
+        1040,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const proj = $('Get Project').first().json;\n    const inp = $('Prepare Input').first().json;\n    const tasks = $input.all().map((i) => i.json).filter((t) => t.id);\n    const isWeekend = (d) => d.getUTCDay() === 0 || d.getUTCDay() === 6;\n    const nextWorkday = (d) => { const x = new Date(d); while (isWeekend(x)) x.setUTCDate(x.getUTCDate() + 1); return x; };\n    const addWorkdays = (d, n) => {\n      const x = new Date(d);\n      while (n > 0) { x.setUTCDate(x.getUTCDate() + 1); if (!isWeekend(x)) n--; }\n      return x;\n    };\n    const today = new Date(); today.setUTCHours(10, 0, 0, 0); // 17:00 giờ VN\n    let start = inp.start_date ? new Date(inp.start_date + 'T10:00:00Z')\n      : proj.start_date ? new Date(proj.start_date + 'T10:00:00Z') : today;\n    if (start < today) start = today;\n    start = nextWorkday(start);\n    const deadline = new Date(proj.deadline + 'T10:00:00Z');\n    const cursor = {}; // mỗi người một timeline riêng\n    const schedule = [];\n    for (const t of tasks) {\n      const key = t.assignee_id || 'shared';\n      const eff = (inp.points_per_day * (Number(t.productivity_score) || 100)) / 100;\n      const days = Math.max(1, Math.ceil((Number(t.story_points) || 1) / eff));\n      const begin = cursor[key] || start;\n      const due = addWorkdays(begin, days - 1);\n      cursor[key] = addWorkdays(due, 1);\n      schedule.push({\n        task_id: t.id, title: t.title, priority: t.priority, assignee: t.assignee_name || 'Chưa gán',\n        days, due_date: due.toISOString(), late: due > deadline,\n      });\n    }\n    const late = schedule.filter((s) => s.late);\n    const sql = schedule.length\n      ? 'UPDATE tasks t SET due_date = v.d::timestamptz, updated_at = CURRENT_TIMESTAMP FROM (VALUES ' +\n        schedule.map((s) => \"('\" + s.task_id + \"','\" + s.due_date + \"')\").join(',') +\n        ') AS v(tid,d) WHERE t.id = v.tid::uuid RETURNING t.id, t.title, t.due_date'\n      : 'SELECT NULL::uuid AS id WHERE false';\n    const last = schedule.reduce((m, s) => (s.due_date > m ? s.due_date : m), '');\n    return [{ json: { schedule, sql, total: schedule.length, late_count: late.length, late, last_due: last, deadline: proj.deadline, project_name: proj.name } }];"
+      },
+      "name": "Schedule Calculation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "3bb51737-29c8-4b70-93b4-642e4c179ab4",
+      "position": [
+        1312,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "name": "Update Due Dates",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "57818445-4227-4b71-9f29-a747e8ce701c",
+      "position": [
+        1568,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $('Schedule Calculation').first().json.schedule;\n    const q = (x) => \"'\" + String(x ?? '').replace(/'/g, \"''\") + \"'\";\n    const sql = s.length\n      ? 'INSERT INTO activity_history (task_id,action_type,new_value,metadata) VALUES ' +\n        s.map((x) => '(' + q(x.task_id) + \"::uuid,'DUE_DATE_SET',\" + q(x.due_date.slice(0, 10)) + ',' +\n          q(JSON.stringify({ source: 'flow4_sprint_scheduling', days: x.days, late: x.late })) + '::jsonb)').join(',')\n      : 'SELECT 1';\n    return [{ json: { sql } }];"
+      },
+      "name": "Build Log SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "c66b56ca-a8f6-4286-824e-1b07b78e0dcd",
+      "position": [
+        1824,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "name": "Log Activity",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "e52e3a56-c391-44bc-917b-952b456014f6",
+      "position": [
+        2080,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "90317587-7f60-4ee0-9ae7-98c91021873b",
+              "leftValue": "={{ $('Schedule Calculation').first().json.late_count > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Overruns Deadline?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "id": "5457ec75-ccb3-4cbc-b321-a840ea540e8d",
+      "position": [
+        2352,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Schedule Calculation').first().json;\n    const prompt = 'Bạn là PM. Dự án \"' + d.project_name + '\" có deadline ' + d.deadline + '. ' +\n      'Lịch Sprint tự động cho thấy task cuối hoàn thành ' + d.last_due.slice(0, 10) + ', ' + d.late_count + '/' + d.total + ' task trễ deadline:\\n' +\n      d.late.map((s) => '- ' + s.title + ' (' + s.assignee + ', due ' + s.due_date.slice(0, 10) + ')').join('\\n') +\n      '\\n\\nViết phân tích rủi ro ngắn (tối đa 120 từ, tiếng Việt, không markdown) và đề xuất 2-3 hành động khắc phục.';\n    return [{ json: { prompt } }];"
+      },
+      "name": "Build Risk Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "2e8989c1-5725-40de-9afd-b15cdf674d3b",
+      "position": [
+        2608,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-3-flash-preview"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.prompt }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "name": "Gemini Risk Analysis",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "id": "9352ad96-f88d-44cb-994c-54f0e6aa44e1",
+      "position": [
+        2864,
+        224
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "uqlXl6EjKaHi9rT5",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Schedule Calculation').first().json;\n    const email = $('Prepare Input').first().json.notify_email;\n    let analysis = 'Toàn bộ task dự kiến hoàn thành trước deadline dự án. Rủi ro thấp.';\n    if ($('Gemini Risk Analysis').isExecuted) {\n      try { analysis = $('Gemini Risk Analysis').first().json.content.parts[0].text; } catch (e) { analysis = '(AI không trả về phân tích)'; }\n    }\n    const q = (s) => \"'\" + String(s ?? '').replace(/'/g, \"''\") + \"'\";\n    const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));\n    const risk = d.total ? (d.late_count / d.total) * 100 : 0;\n    const pid = $('Prepare Input').first().json.project_id;\n    const metrics = { total_tasks: d.total, late_tasks: d.late_count, last_due: d.last_due, deadline: d.deadline };\n    const sql = 'INSERT INTO reports (project_id, report_type, risk_score, ai_summary, metrics) VALUES (' + q(pid) +\n      \"::uuid, 'DEADLINE_RISK', \" + risk.toFixed(2) + ', ' + q(analysis) + ', ' + q(JSON.stringify(metrics)) + '::jsonb) RETURNING id';\n    const rows = d.schedule.map((s) => '<tr><td>' + esc(s.title) + '</td><td>' + esc(s.assignee) + '</td><td>' + s.due_date.slice(0, 10) + (s.late ? ' ⚠️' : '') + '</td></tr>').join('');\n    const html = '<h2>📅 Sprint Auto-scheduling</h2><p>Dự án: <b>' + esc(d.project_name) + '</b> | Deadline: <b>' + d.deadline + '</b></p>' +\n      '<p>Rủi ro trễ hạn: <b>' + risk.toFixed(0) + '%</b> (' + d.late_count + '/' + d.total + ' task)</p>' +\n      '<table border=\"1\" cellpadding=\"6\" style=\"border-collapse:collapse\"><tr><th>Task</th><th>Người làm</th><th>Due</th></tr>' + rows + '</table>' +\n      '<h3>Phân tích AI</h3><p>' + esc(analysis) + '</p>';\n    return [{ json: {\n      sql, notify_email: email,\n      subject: (d.late_count ? '⚠️' : '✅') + ' [Luồng 4] Lịch Sprint: rủi ro trễ hạn ' + risk.toFixed(0) + '%',\n      html,\n      response: { success: true, ...metrics, risk_score: Number(risk.toFixed(2)), ai_analysis: analysis,\n        schedule: d.schedule.map((s) => ({ task: s.title, assignee: s.assignee, due_date: s.due_date, late: s.late })) },\n    } }];"
+      },
+      "name": "Build Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "43d4af49-330f-4bd4-b3dc-2870b884afd2",
+      "position": [
+        3120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "name": "Save Report",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "9eff82c9-2b8f-4831-85e0-f31b9991c9d6",
+      "position": [
+        3392,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Build Report').first().json.notify_email }}",
+        "subject": "={{ $('Build Report').first().json.subject }}",
+        "message": "={{ $('Build Report').first().json.html }}",
+        "options": {}
+      },
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "id": "2190692d-85ea-4403-a6cc-df35a2ee7489",
+      "position": [
+        3648,
+        0
+      ],
+      "webhookId": "b3b8a45f-0a95-4e13-9823-9d5a1fd1f838",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "0UtX1cQWu7PvgpLf",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Build Report').first().json.response) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "id": "660c1c3b-f328-457d-b824-3f084a515b66",
+      "position": [
+        3904,
+        0
+      ]
     }
   ],
   "pinData": {
@@ -79,7 +360,9 @@
       {
         "json": {
           "body": {
-            "project_id": "a0000001-0000-0000-0000-000000000001"
+            "project_id": "a0000001-0000-0000-0000-000000000001",
+            "points_per_day": 2,
+            "notify_email": "htchannelas@gmail.com"
           }
         }
       }
@@ -90,29 +373,175 @@
       "main": [
         [
           {
-            "node": "Execute a SQL query",
+            "node": "Prepare Input",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Execute a SQL query": {
+    "Prepare Input": {
       "main": [
         [
           {
-            "node": "Code in JavaScript",
+            "node": "Get Project",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Code in JavaScript": {
+    "Get Project": {
       "main": [
         [
           {
-            "node": "Execute a SQL query1",
+            "node": "Project Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Project Found?": {
+      "main": [
+        [
+          {
+            "node": "Get Sprint Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 404",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Sprint Tasks": {
+      "main": [
+        [
+          {
+            "node": "Schedule Calculation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Calculation": {
+      "main": [
+        [
+          {
+            "node": "Update Due Dates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Due Dates": {
+      "main": [
+        [
+          {
+            "node": "Build Log SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Log SQL": {
+      "main": [
+        [
+          {
+            "node": "Log Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Activity": {
+      "main": [
+        [
+          {
+            "node": "Overruns Deadline?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Overruns Deadline?": {
+      "main": [
+        [
+          {
+            "node": "Build Risk Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Risk Prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini Risk Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Risk Analysis": {
+      "main": [
+        [
+          {
+            "node": "Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Report": {
+      "main": [
+        [
+          {
+            "node": "Save Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Report": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Gmail": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
             "type": "main",
             "index": 0
           }
@@ -125,12 +554,12 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "99084624-4987-4918-a35c-9e2b6bac856e",
+  "versionId": "bfeb09de-36f2-4763-87da-9f10436eb6e8",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "33515e9d621b9af39628b241f4fb5fb52353580cedd8c7947d66ef61b2ad0564"
   },
   "nodeGroups": [],
-  "id": "moqGzAkJrRNuJZxX",
+  "id": "MckTDOgKPULNC6zu",
   "tags": []
 }

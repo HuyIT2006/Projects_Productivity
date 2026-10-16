@@ -5,18 +5,117 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "task-breakdown",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {}
       },
+      "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
+      "webhookId": "90966bdf-75d1-45f0-89d6-6f78aec257b5",
+      "id": "244fd538-50a6-4538-b6e5-d3db12af140e",
       "position": [
         0,
         0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "5a3aeb7d-22bc-4943-84bd-992f18d5db53",
+              "leftValue": "={{ String($json.body?.feature_description || '').trim().length >= 10 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "id": "7bc0d36c-cb9b-4707-9e38-e92bb207d0da",
+      "position": [
+        272,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: 'feature_description phải có ít nhất 10 ký tự' }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "name": "Respond 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "id": "57c74d09-f310-416f-81f6-c378aa930990",
+      "position": [
+        528,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || {};\n    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n    const mail = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;\n    return [{ json: {\n      project_id: uuid.test(b.project_id || '') ? b.project_id : 'a0000001-0000-0000-0000-000000000001',\n      feature_description: String(b.feature_description || '').trim().slice(0, 1000),\n      notify_email: mail.test(b.notify_email || '') ? b.notify_email : 'htchannelas@gmail.com',\n    } }];"
+      },
+      "name": "Prepare Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "cde79bb9-89d8-48a7-814a-7e2e47b01bc1",
+      "position": [
+        528,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT p.name, p.description, p.deadline::text AS deadline, COALESCE((SELECT json_agg(title) FROM tasks WHERE project_id = p.id), '[]'::json) AS existing_titles FROM projects p WHERE p.id = '{{ $json.project_id }}'::uuid",
+        "options": {}
+      },
+      "name": "Get Project Context",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "b8da5424-3bf6-44f1-adf7-8ee34587b01c",
+      "position": [
+        784,
+        0
       ],
-      "id": "fbb358e7-0cb5-4433-bffe-edd6b3df0183",
-      "name": "Webhook",
-      "webhookId": "ab768557-5f5f-4626-ae06-eaa3abf39e36"
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const inp = $('Prepare Input').first().json;\n    const ctx = $input.first().json;\n    const existing = Array.isArray(ctx.existing_titles) ? ctx.existing_titles : [];\n    const prompt = [\n      'Bạn là một AI Project Manager chuyên nghiệp.',\n      'Dự án: ' + (ctx.name || '(không rõ)') + ' - ' + (ctx.description || ''),\n      'Deadline dự án: ' + (ctx.deadline || 'chưa có'),\n      'Các task ĐÃ CÓ (không được tạo trùng): ' + (existing.length ? existing.join('; ') : 'chưa có'),\n      '',\n      'Yêu cầu tính năng mới: \"' + inp.feature_description + '\"',\n      '',\n      'Hãy chia nhỏ tính năng thành 3 đến 5 task kỹ thuật cụ thể.',\n      'CHỈ trả về một JSON Array thuần (không markdown, không giải thích) theo cấu trúc:',\n      '[{\"title\":\"...\",\"description\":\"...\",\"story_points\":3,\"required_skills\":[\"Next.js\",\"PostgreSQL\"],\"priority\":\"HIGH\"}]',\n      'story_points từ 1-8; priority là một trong LOW, MEDIUM, HIGH, URGENT.',\n    ].join('\\n');\n    return [{ json: { prompt } }];"
+      },
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "91a23873-e234-46cf-a57e-1d7d9b3faf0a",
+      "position": [
+        1040,
+        0
+      ]
     },
     {
       "parameters": {
@@ -28,62 +127,218 @@
         "messages": {
           "values": [
             {
-              "content": "=Bạn là một AI Project Manager chuyên nghiệp. \nDựa vào yêu cầu tính năng sau: \"{{ $json.body.feature_description }}\"\n\nHãy phân tích và chia nhỏ tính năng này thành 3 đến 5 task kỹ thuật cụ thể.\nTrả về kết quả duy nhất là một chuỗi JSON Array (không thêm bớt bất kỳ lời giải thích nào và không dùng markdown ```json), định dạng đúng cấu trúc:\n[\n  {\n    \"title\": \"Tên task ngắn gọn\",\n    \"description\": \"Mô tả chi tiết việc cần làm\",\n    \"story_points\": 3,\n    \"required_skills\": [\"Next.js\", \"PostgreSQL\"],\n    \"priority\": \"HIGH\"\n  }\n]"
+              "content": "={{ $json.prompt }}"
             }
           ]
         },
-        "jsonOutput": true,
         "builtInTools": {},
         "options": {}
       },
+      "name": "Gemini Breakdown",
       "type": "@n8n/n8n-nodes-langchain.googleGemini",
       "typeVersion": 1.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "id": "125178db-3564-4956-ae6c-1194d9012f9e",
       "position": [
-        224,
+        1312,
         0
       ],
-      "id": "56d8ca98-a4a5-4ac6-8994-efde3490c5e9",
-      "name": "Message a model",
       "credentials": {
         "googlePalmApi": {
           "id": "uqlXl6EjKaHi9rT5",
           "name": "Google Gemini(PaLM) Api account"
         }
-      }
+      },
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "// Lấy văn bản chứa danh sách Task từ Gemini\nlet rawText = $input.first().json.content.parts[0].text;\n\n// Làm sạch ký tự rác nếu có\nrawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();\n\nconst tasks = JSON.parse(rawText);\nconst projectId = $(\"Webhook\").item.json.body.project_id || \"a0000001-0000-0000-0000-000000000001\";\n\n// Chuyển mảng task thành từng item cho n8n\nreturn tasks.map(task => ({\n  json: {\n    project_id: projectId,\n    title: task.title,\n    description: task.description,\n    story_points: task.story_points || 3,\n    required_skills: task.required_skills || [],\n    priority: task.priority || \"MEDIUM\"\n  }\n}));"
+        "jsCode": "try {\n      let raw = $input.first().json.content.parts[0].text || '';\n      raw = raw.replace(/```json/gi, '').replace(/```/g, '').trim();\n      const s = raw.indexOf('['), e = raw.lastIndexOf(']');\n      if (s < 0 || e < 0) throw new Error('Không tìm thấy JSON array trong phản hồi AI');\n      const tasks = JSON.parse(raw.slice(s, e + 1));\n      if (!Array.isArray(tasks) || tasks.length === 0) throw new Error('AI trả về mảng task rỗng');\n      return [{ json: { ok: true, tasks } }];\n    } catch (err) {\n      return [{ json: { ok: false, error: 'Lỗi xử lý phản hồi AI: ' + err.message } }];\n    }"
       },
+      "name": "Parse and Validate",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
+      "id": "98de2fe0-49ae-4b38-8686-feb978b02a40",
       "position": [
-        592,
+        1568,
         0
-      ],
-      "id": "1f3f1963-322b-4728-9e50-637d9d006eef",
-      "name": "Code in JavaScript"
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "d0108c15-c6e8-407a-ad1a-e8fbec93eba2",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Parse OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "id": "f92974d8-25d5-4ec6-9737-7dda8c16ef00",
+      "position": [
+        1824,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: $json.error }) }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "name": "Respond 502",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "id": "2d7fbccc-ff2d-468c-847d-463f8d00e30d",
+      "position": [
+        2080,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const inp = $('Prepare Input').first().json;\n    const ctx = $('Get Project Context').first().json;\n    const existing = Array.isArray(ctx.existing_titles) ? ctx.existing_titles : [];\n    const seen = new Set(existing.map((t) => String(t).toLowerCase().trim()));\n    const okPr = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'];\n    const q = (s) => \"'\" + String(s ?? '').replace(/'/g, \"''\") + \"'\";\n    const tasks = [], skipped = [];\n    for (const t of $input.first().json.tasks) {\n      const title = String(t.title || '').trim().slice(0, 255);\n      if (!title) continue;\n      if (seen.has(title.toLowerCase())) { skipped.push(title); continue; }\n      seen.add(title.toLowerCase());\n      const pr = String(t.priority || '').toUpperCase();\n      tasks.push({\n        title,\n        description: String(t.description || ''),\n        story_points: Math.min(8, Math.max(1, parseInt(t.story_points) || 3)),\n        priority: okPr.includes(pr) ? pr : 'MEDIUM',\n        required_skills: Array.isArray(t.required_skills) ? t.required_skills.map(String) : [],\n      });\n    }\n    const values = tasks.map((t) => '(' + [\n      q(inp.project_id) + '::uuid', q(t.title), q(t.description), t.story_points,\n      'ARRAY[' + t.required_skills.map(q).join(',') + ']::text[]', q(t.priority), \"'TODO'\",\n    ].join(',') + ')');\n    const sql = tasks.length\n      ? 'INSERT INTO tasks (project_id,title,description,story_points,required_skills,priority,status) VALUES ' +\n        values.join(',') + ' RETURNING id,title,story_points,priority'\n      : 'SELECT NULL::uuid AS id WHERE false';\n    return [{ json: { sql, skipped, generated: tasks.length } }];"
+      },
+      "name": "Normalize and Dedupe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "faebd6d0-57e1-4f7c-8c4e-4ca7f82d30c9",
+      "position": [
+        2352,
+        0
+      ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO tasks (project_id, title, description, story_points, required_skills, priority, status)\nVALUES (\n  '{{ $json.project_id }}',\n  '{{ $json.title }}',\n  '{{ $json.description }}',\n  {{ $json.story_points }},\n  ARRAY[{{ $json.required_skills.map(s => \"'\" + s.replace(/'/g, \"''\") + \"'\").join(\",\") }}]::text[],\n  '{{ $json.priority }}',\n  'TODO'\n);",
+        "query": "{{ $json.sql }}",
         "options": {}
       },
+      "name": "Insert Tasks",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "1f830555-084b-4904-9241-bcde15417f04",
       "position": [
-        816,
+        2608,
         0
       ],
-      "id": "1d276ce3-3074-4fa0-b864-28069182a23f",
-      "name": "Execute a SQL query",
       "credentials": {
         "postgres": {
           "id": "GtFHLYZn1QvEQSpk",
           "name": "Postgres account"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map((i) => i.json).filter((r) => r.id);\n    const q = (s) => \"'\" + String(s ?? '').replace(/'/g, \"''\") + \"'\";\n    const sql = rows.length\n      ? 'INSERT INTO activity_history (task_id,action_type,new_value,metadata) VALUES ' +\n        rows.map((r) => '(' + q(r.id) + \"::uuid,'TASK_CREATED',\" + q(String(r.title).slice(0, 100)) + ',' +\n          q(JSON.stringify({ source: 'flow1_ai_breakdown' })) + '::jsonb)').join(',')\n      : 'SELECT 1';\n    return [{ json: { sql, created: rows } }];"
+      },
+      "name": "Build Log SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "4159bef1-b4aa-497b-aa2c-e76e20eda9cd",
+      "position": [
+        2864,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "name": "Log Activity",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "c5cf2589-6e0a-4dc1-aff9-414c7dc28cce",
+      "position": [
+        3120,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const created = $('Build Log SQL').first().json.created;\n    const norm = $('Normalize and Dedupe').first().json;\n    const inp = $('Prepare Input').first().json;\n    const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));\n    const rows = created.map((t) => '<tr><td>' + esc(t.title) + '</td><td>' + t.story_points + '</td><td>' + t.priority + '</td></tr>').join('');\n    const html = '<h2>🤖 AI Task Breakdown hoàn tất</h2><p><b>Yêu cầu:</b> ' + esc(inp.feature_description) + '</p>' +\n      '<p>Đã tạo <b>' + created.length + '</b> task, bỏ qua <b>' + norm.skipped.length + '</b> task trùng.</p>' +\n      '<table border=\"1\" cellpadding=\"6\" style=\"border-collapse:collapse\"><tr><th>Task</th><th>SP</th><th>Ưu tiên</th></tr>' + rows + '</table>';\n    return [{ json: {\n      notify_email: inp.notify_email,\n      subject: '✅ [Luồng 1] AI đã tạo ' + created.length + ' task mới',\n      html,\n      response: { success: true, created_count: created.length, skipped: norm.skipped, tasks: created },\n    } }];"
+      },
+      "name": "Build Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "a05af7d5-03d0-43e4-bcc4-def41ddc383c",
+      "position": [
+        3392,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Build Summary').first().json.notify_email }}",
+        "subject": "={{ $('Build Summary').first().json.subject }}",
+        "message": "={{ $('Build Summary').first().json.html }}",
+        "options": {}
+      },
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "id": "4e9e2e3b-1db3-4f9a-82a3-3b79322cd718",
+      "position": [
+        3648,
+        0
+      ],
+      "webhookId": "18a408c2-0a69-4c8e-b874-d8f67f9cabe0",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "0UtX1cQWu7PvgpLf",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Build Summary').first().json.response) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "id": "3dc034d3-9cc0-46a6-a244-04963aa6e5ff",
+      "position": [
+        3904,
+        0
+      ]
     }
   ],
   "pinData": {
@@ -92,7 +347,8 @@
         "json": {
           "body": {
             "project_id": "a0000001-0000-0000-0000-000000000001",
-            "feature_description": "Xây dựng hệ thống đăng nhập bằng Google OAuth2 và bảo mật JWT"
+            "feature_description": "Xây dựng hệ thống đăng nhập bằng Google OAuth2 và bảo mật JWT",
+            "notify_email": "htchannelas@gmail.com"
           }
         }
       }
@@ -103,29 +359,164 @@
       "main": [
         [
           {
-            "node": "Message a model",
+            "node": "Validate Input",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Message a model": {
+    "Validate Input": {
       "main": [
         [
           {
-            "node": "Code in JavaScript",
+            "node": "Prepare Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Code in JavaScript": {
+    "Prepare Input": {
       "main": [
         [
           {
-            "node": "Execute a SQL query",
+            "node": "Get Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Project Context": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini Breakdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Breakdown": {
+      "main": [
+        [
+          {
+            "node": "Parse and Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse and Validate": {
+      "main": [
+        [
+          {
+            "node": "Parse OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse OK?": {
+      "main": [
+        [
+          {
+            "node": "Normalize and Dedupe",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize and Dedupe": {
+      "main": [
+        [
+          {
+            "node": "Insert Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Tasks": {
+      "main": [
+        [
+          {
+            "node": "Build Log SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Log SQL": {
+      "main": [
+        [
+          {
+            "node": "Log Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Activity": {
+      "main": [
+        [
+          {
+            "node": "Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Gmail": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
             "type": "main",
             "index": 0
           }
@@ -133,17 +524,17 @@
       ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "e5b1721d-fa69-458a-9322-2a5c766f3e0c",
+  "versionId": "07b4e617-11c2-45b1-bdf1-7aa4f1d77c6b",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "33515e9d621b9af39628b241f4fb5fb52353580cedd8c7947d66ef61b2ad0564"
   },
   "nodeGroups": [],
-  "id": "aokB5eAMBX0z8zke",
+  "id": "I8RV4QFEAVMfLUOD",
   "tags": []
 }

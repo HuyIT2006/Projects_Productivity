@@ -5,33 +5,47 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "workload-balancer",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {}
       },
+      "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
+      "webhookId": "6aa2179d-51bb-485d-ba18-2a37069d11f4",
+      "id": "9daa1cd4-0b60-4e78-9c94-f7a350973f83",
       "position": [
         0,
         0
-      ],
-      "id": "be47ea5f-a394-4eae-9c56-c65d5a086719",
-      "name": "Webhook",
-      "webhookId": "626db0bc-e602-4a65-bd34-038a2f5a15c4"
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || {};\n    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n    const mail = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;\n    const pid = uuid.test(b.project_id || '') ? b.project_id : null;\n    const filter = pid ? \"AND project_id = '\" + pid + \"'::uuid \" : '';\n    const sql_tasks = 'SELECT id,title,story_points,priority,project_id FROM tasks WHERE assignee_id IS NULL ' + filter +\n      \"AND status <> 'DONE' ORDER BY CASE priority WHEN 'URGENT' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END, created_at\";\n    return [{ json: { sql_tasks, notify_email: mail.test(b.notify_email || '') ? b.notify_email : 'htchannelas@gmail.com' } }];"
+      },
+      "name": "Prepare Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "34dd135b-bbf7-4d37-bf30-238cae463c78",
+      "position": [
+        272,
+        0
+      ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT m.id AS member_id, m.full_name, COUNT(t.id) AS current_workload, m.max_workload\nFROM members m\nLEFT JOIN tasks t ON t.assignee_id = m.id AND t.status IN ('TODO', 'IN_PROGRESS')\nGROUP BY m.id, m.full_name, m.max_workload\nHAVING COUNT(t.id) < m.max_workload\nORDER BY current_workload ASC\nLIMIT 1;",
+        "query": "{{ $json.sql_tasks }}",
         "options": {}
       },
+      "name": "Get Unassigned Tasks",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "bb422f8b-71d6-4a40-8fa6-458dc6c19230",
       "position": [
-        224,
+        528,
         0
       ],
-      "id": "17bc0249-70ac-4ffd-8653-9a48f7c73e76",
-      "name": "Execute a SQL query",
       "credentials": {
         "postgres": {
           "id": "GtFHLYZn1QvEQSpk",
@@ -41,24 +55,271 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "UPDATE tasks \nSET assignee_id = '{{ $json.member_id }}', updated_at = CURRENT_TIMESTAMP\nWHERE id IN (\n  SELECT id FROM tasks \n  WHERE assignee_id IS NULL \n  ORDER BY created_at ASC \n  LIMIT 1\n)\nRETURNING id, title, assignee_id, priority, status;",
+        "jsCode": "const tasks = $input.all().map((i) => i.json).filter((t) => t.id);\n    return [{ json: { tasks, count: tasks.length } }];"
+      },
+      "name": "Collect Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "9add9196-52f5-407f-893f-c7a870e3ba72",
+      "position": [
+        784,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "77c9d901-0864-4a23-89aa-5388c981ed8c",
+              "leftValue": "={{ $json.count > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
         "options": {}
       },
+      "name": "Has Tasks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "id": "686c8df5-9a17-4dba-aa08-f49f36afbf53",
+      "position": [
+        1040,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, assigned_count: 0, message: 'Không có task nào chưa được gán' }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Respond No Tasks",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "id": "8d21b01d-3d13-4619-b424-cabdc9084a16",
+      "position": [
+        1312,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.id, m.full_name, m.max_workload, m.skills, COALESCE(m.productivity_score,100)::float AS productivity_score, COUNT(t.id) FILTER (WHERE t.status IN ('TODO','IN_PROGRESS','IN_REVIEW'))::int AS current_load FROM members m LEFT JOIN tasks t ON t.assignee_id = m.id GROUP BY m.id ORDER BY m.full_name",
+        "options": {}
+      },
+      "name": "Get Member Workload",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "843db828-8914-49e1-9021-f4820b78017f",
       "position": [
-        448,
+        1312,
         0
       ],
-      "id": "0d09cd97-36ce-470c-82e9-f8063c87c243",
-      "name": "Execute a SQL query1",
       "credentials": {
         "postgres": {
           "id": "GtFHLYZn1QvEQSpk",
           "name": "Postgres account"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $('Collect Tasks').first().json.tasks;\n    const members = $input.all().map((i) => i.json).filter((m) => m.id)\n      .map((m) => Object.assign({}, m, { load: Number(m.current_load), max: Number(m.max_workload) }));\n    const assignments = [], unassigned = [];\n    for (const t of tasks) {\n      const cands = members.filter((m) => m.load < m.max);\n      if (!cands.length) { unassigned.push({ id: t.id, title: t.title }); continue; }\n      cands.sort((a, b) => (a.load / a.max) - (b.load / b.max) || b.productivity_score - a.productivity_score);\n      const m = cands[0];\n      m.load++;\n      assignments.push({ task_id: t.id, title: t.title, member_id: m.id, member_name: m.full_name });\n    }\n    const sql = assignments.length\n      ? 'UPDATE tasks t SET assignee_id = v.mid::uuid, updated_at = CURRENT_TIMESTAMP FROM (VALUES ' +\n        assignments.map((a) => \"('\" + a.task_id + \"','\" + a.member_id + \"')\").join(',') +\n        ') AS v(tid,mid) WHERE t.id = v.tid::uuid RETURNING t.id, t.title, t.assignee_id'\n      : 'SELECT NULL::uuid AS id WHERE false';\n    const workload = members.map((m) => ({ name: m.full_name, load: m.load, max: m.max }));\n    return [{ json: { assignments, unassigned, workload, sql } }];"
+      },
+      "name": "Compute Distribution",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "dae802c2-0a92-4037-983a-7190d4870956",
+      "position": [
+        1568,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "name": "Update Assignees",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "92304f15-a723-4285-993b-b723716c1b7d",
+      "position": [
+        1824,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const a = $('Compute Distribution').first().json.assignments;\n    const q = (s) => \"'\" + String(s ?? '').replace(/'/g, \"''\") + \"'\";\n    const sql = a.length\n      ? 'INSERT INTO activity_history (task_id,member_id,action_type,new_value,metadata) VALUES ' +\n        a.map((x) => '(' + q(x.task_id) + '::uuid,' + q(x.member_id) + \"::uuid,'TASK_ASSIGNED',\" +\n          q(String(x.member_name).slice(0, 100)) + ',' + q(JSON.stringify({ source: 'flow2_workload_balancer' })) + '::jsonb)').join(',')\n      : 'SELECT 1';\n    return [{ json: { sql } }];"
+      },
+      "name": "Build Log SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "4dc33249-d15a-4020-9850-8c8eff4c9a7c",
+      "position": [
+        2080,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "name": "Log Activity",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "alwaysOutputData": true,
+      "id": "902baa91-9a38-4479-8a52-8da00b6fea6a",
+      "position": [
+        2352,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "GtFHLYZn1QvEQSpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Compute Distribution').first().json;\n    const email = $('Prepare Input').first().json.notify_email;\n    const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));\n    const rows = d.assignments.map((a) => '<tr><td>' + esc(a.title) + '</td><td>' + esc(a.member_name) + '</td></tr>').join('');\n    const load = d.workload.map((w) => '<li>' + esc(w.name) + ': ' + w.load + '/' + w.max + '</li>').join('');\n    const html = '<h2>⚖️ Cân bằng tải hoàn tất</h2><p>Đã gán <b>' + d.assignments.length + '</b> task, ' +\n      '<b>' + d.unassigned.length + '</b> task chưa gán được.</p>' +\n      '<table border=\"1\" cellpadding=\"6\" style=\"border-collapse:collapse\"><tr><th>Task</th><th>Người nhận</th></tr>' + rows + '</table>' +\n      '<h3>Tải sau khi gán</h3><ul>' + load + '</ul>';\n    return [{ json: {\n      notify_email: email,\n      has_overflow: d.unassigned.length > 0,\n      subject: '✅ [Luồng 2] Đã gán ' + d.assignments.length + ' task',\n      html,\n      response: { success: true, assigned_count: d.assignments.length, unassigned_count: d.unassigned.length,\n        assignments: d.assignments, unassigned: d.unassigned, workload: d.workload },\n    } }];"
+      },
+      "name": "Build Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "3efd0179-dc8b-4deb-a6b1-b94740c847df",
+      "position": [
+        2608,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "0aa348d1-ae9f-4dea-9d0b-f9a216546d7c",
+              "leftValue": "={{ $json.has_overflow }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has Overflow?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "id": "1cdcebe5-f47a-4a8e-a063-5efe46728122",
+      "position": [
+        2864,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ff9e1c3f-b9e2-4c54-aeb4-cf12b72461a2",
+              "name": "subject",
+              "value": "=⚠️ [Luồng 2] {{ $json.response.unassigned_count }} task chưa gán được (team quá tải)",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "name": "Set Overflow Warning",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "id": "c997b8ff-3509-45ce-adf0-c669f0d889f3",
+      "position": [
+        3120,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.notify_email }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "id": "4faefa9f-74ce-4d19-bd67-55ff44f9dd3b",
+      "position": [
+        3392,
+        0
+      ],
+      "webhookId": "9a94524a-7225-4106-b980-b61348add343",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "0UtX1cQWu7PvgpLf",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Build Summary').first().json.response) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "id": "c63b4f90-7d44-4e25-a5c7-96a3eb004c29",
+      "position": [
+        3648,
+        0
+      ]
     }
   ],
   "pinData": {
@@ -66,7 +327,8 @@
       {
         "json": {
           "body": {
-            "trigger": "auto_assign"
+            "project_id": "a0000001-0000-0000-0000-000000000001",
+            "notify_email": "htchannelas@gmail.com"
           }
         }
       }
@@ -77,18 +339,164 @@
       "main": [
         [
           {
-            "node": "Execute a SQL query",
+            "node": "Prepare Input",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Execute a SQL query": {
+    "Prepare Input": {
       "main": [
         [
           {
-            "node": "Execute a SQL query1",
+            "node": "Get Unassigned Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Unassigned Tasks": {
+      "main": [
+        [
+          {
+            "node": "Collect Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Tasks": {
+      "main": [
+        [
+          {
+            "node": "Has Tasks?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Tasks?": {
+      "main": [
+        [
+          {
+            "node": "Get Member Workload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond No Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Member Workload": {
+      "main": [
+        [
+          {
+            "node": "Compute Distribution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Distribution": {
+      "main": [
+        [
+          {
+            "node": "Update Assignees",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Assignees": {
+      "main": [
+        [
+          {
+            "node": "Build Log SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Log SQL": {
+      "main": [
+        [
+          {
+            "node": "Log Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Activity": {
+      "main": [
+        [
+          {
+            "node": "Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Summary": {
+      "main": [
+        [
+          {
+            "node": "Has Overflow?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Overflow?": {
+      "main": [
+        [
+          {
+            "node": "Set Overflow Warning",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Overflow Warning": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Gmail": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
             "type": "main",
             "index": 0
           }
@@ -101,12 +509,12 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "7f817756-70ab-4fa9-8341-e432d21df6b9",
+  "versionId": "213fc218-7f58-4667-9789-4ce30bb204e4",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "33515e9d621b9af39628b241f4fb5fb52353580cedd8c7947d66ef61b2ad0564"
   },
   "nodeGroups": [],
-  "id": "oocRhSQZ8DFlarYA",
+  "id": "JKZfoIM4lqWrRaoU",
   "tags": []
 }
