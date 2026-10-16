@@ -1,5 +1,5 @@
 {
-  "name": "Luong10",
+  "name": "luong10_AI_Weekly_Executive_Report",
   "nodes": [
     {
       "parameters": {
@@ -15,14 +15,43 @@
           ]
         }
       },
+      "id": "8578a04d-bfdf-47b0-aa0a-abc41e1f12fa",
+      "name": "1. Schedule Trigger1",
       "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.4,
+      "typeVersion": 1.2,
       "position": [
-        0,
-        0
-      ],
-      "id": "971f8b58-658f-49df-9ccb-567ef23a8c1c",
-      "name": "Schedule Trigger"
+        -736,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "p_id",
+              "name": "project_id",
+              "value": "a0000001-0000-0000-0000-000000000001",
+              "type": "string"
+            },
+            {
+              "id": "l_days",
+              "name": "lookback_days",
+              "value": 7,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1a3c967-8242-4712-a2a2-32ed1a0a3c04",
+      "name": "2. Set Report Config1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -544,
+        784
+      ]
     },
     {
       "parameters": {
@@ -30,14 +59,14 @@
         "query": "SELECT t.title, t.story_points, m.full_name AS assignee\nFROM tasks t\nLEFT JOIN members m ON t.assignee_id = m.id\nWHERE t.status = 'DONE' \nAND t.updated_at >= CURRENT_DATE - INTERVAL '7 days';",
         "options": {}
       },
+      "id": "c2516ed3-2ff0-4eea-b4e2-3f9cca0d54b9",
+      "name": "3. Fetch Completed Tasks1",
       "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.7,
+      "typeVersion": 2.4,
       "position": [
-        224,
-        0
+        -336,
+        784
       ],
-      "id": "a211fa55-7bb0-4de5-8f60-d4320d14f2b7",
-      "name": "Execute a SQL query",
       "credentials": {
         "postgres": {
           "id": "8h92NkUaOJ8thyTF",
@@ -47,21 +76,204 @@
     },
     {
       "parameters": {
-        "fieldsToAggregate": {
-          "fieldToAggregate": [
-            {}
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond_has_tasks",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9d2d2f1d-fb4a-4a8f-8225-051c3b79cad5",
+      "name": "4. Check Has Tasks1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -144,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "empty_msg",
+              "name": "status",
+              "value": "NO_TASKS_COMPLETED_THIS_WEEK",
+              "type": "string"
+            }
           ]
         },
         "options": {}
       },
+      "id": "11843224-c721-4dce-aaf4-aa376d0393c1",
+      "name": "12b. No Tasks Log1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        64,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sort",
+        "sortFieldsUi": {
+          "sortField": [
+            {
+              "fieldName": "story_points",
+              "order": "descending"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f9aacc7b-80f4-4efe-bb60-b73ffbe078a9",
+      "name": "5. Sort Tasks by Points1",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 3,
+      "position": [
+        64,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "9389c10a-ae9e-4227-ba4a-3146bd58ef78",
+      "name": "6. Combine Tasks Array1",
       "type": "n8n-nodes-base.aggregate",
       "typeVersion": 1,
       "position": [
-        448,
-        0
+        272,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "prompt_id",
+              "name": "ai_prompt",
+              "value": "={{ \"Bạn là Giám đốc dự án. Dưới đây là danh sách các công việc team đã hoàn thành trong tuần qua:\\n\" + JSON.stringify($json.data) + \"\\n\\nHãy viết một báo cáo tổng kết ngắn gọn.\\nBẮT BUỘC trả về kết quả CHỈ bằng một chuỗi JSON có định dạng sau (không giải thích thêm):\\n{\\n  \\\"ai_summary\\\": \\\"Viết 2-3 câu tóm tắt thành tích của team và những điểm sáng trong tuần\\\",\\n  \\\"completed_tasks_count\\\": \" + $json.data.length + \"\\n}\" }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "95387203-6150-44be-807b-3973da3ced02",
+      "name": "7. Build AI Prompt1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        464,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "raw_id",
+              "name": "raw_text",
+              "value": "={{ $json.content.parts[0].text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6a24b893-9273-40aa-b053-ce01c8c5cbfd",
+      "name": "9. Extract AI Text1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        992,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawText = $input.item.json.raw_text.replace(/```json/g, '').replace(/```/g, '').trim();\nconst parsed = JSON.parse(rawText);\nreturn parsed;"
+      },
+      "id": "ef140972-6647-48d7-a17c-e91ad3e26427",
+      "name": "10. Parse JSON Safety1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO reports (project_id, report_type, ai_summary, metrics)\nVALUES (\n    'a0000001-0000-0000-0000-000000000001', \n    'WEEKLY_REPORT', \n    $${{ $json.ai_summary }}$$,\n    jsonb_build_object('completed_tasks', {{ $json.completed_tasks_count }})\n);",
+        "options": {}
+      },
+      "id": "811628c6-4539-4d46-bdfc-d4d8e01df278",
+      "name": "11. Save Weekly Report1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1392,
+        672
       ],
-      "id": "c2e58f31-647d-4c6e-a232-900b03dbfa75",
-      "name": "Aggregate"
+      "credentials": {
+        "postgres": {
+          "id": "8h92NkUaOJ8thyTF",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "status_id",
+              "name": "execution_status",
+              "value": "SUCCESS",
+              "type": "string"
+            },
+            {
+              "id": "time_id",
+              "name": "executed_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1c29fff5-350c-45b5-8d41-56f127bc6a08",
+      "name": "12. Audit Success Log1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1600,
+        672
+      ]
     },
     {
       "parameters": {
@@ -73,7 +285,7 @@
         "messages": {
           "values": [
             {
-              "content": "=Bạn là Giám đốc dự án. Dưới đây là danh sách các công việc team đã hoàn thành trong tuần qua:\n{{ $json.data }}\n\nHãy viết một báo cáo tổng kết ngắn gọn.\nBẮT BUỘC trả về kết quả CHỈ bằng một chuỗi JSON có định dạng sau (không giải thích thêm):\n{\n  \"ai_summary\": \"Viết 2-3 câu tóm tắt thành tích của team và những điểm sáng trong tuần\",\n  \"completed_tasks_count\": 1\n}"
+              "content": "={{ $json.ai_prompt }}"
             }
           ]
         },
@@ -83,10 +295,10 @@
       "type": "@n8n/n8n-nodes-langchain.googleGemini",
       "typeVersion": 1.2,
       "position": [
-        672,
-        0
+        688,
+        672
       ],
-      "id": "5a03ab13-9c2c-43a0-afe8-54c8b468414e",
+      "id": "edaba75b-6b20-47b7-9d9a-7f89c399c7b8",
       "name": "Message a model",
       "credentials": {
         "googlePalmApi": {
@@ -94,54 +306,84 @@
           "name": "Google Gemini(PaLM) Api account"
         }
       }
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "INSERT INTO reports (project_id, report_type, ai_summary, metrics)\nVALUES (\n    'a0000001-0000-0000-0000-000000000001', \n    'WEEKLY_REPORT', \n    $${{ JSON.parse($json.content.parts[0].text).ai_summary }}$$,\n    jsonb_build_object('completed_tasks', {{ JSON.parse($json.content.parts[0].text).completed_tasks_count }})\n);",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.7,
-      "position": [
-        1040,
-        0
-      ],
-      "id": "a44f4244-fabb-4592-b419-f436aa8b3a0a",
-      "name": "Execute a SQL query1",
-      "credentials": {
-        "postgres": {
-          "id": "8h92NkUaOJ8thyTF",
-          "name": "Postgres account"
-        }
-      }
     }
   ],
   "pinData": {},
   "connections": {
-    "Schedule Trigger": {
+    "1. Schedule Trigger1": {
       "main": [
         [
           {
-            "node": "Execute a SQL query",
+            "node": "2. Set Report Config1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Execute a SQL query": {
+    "2. Set Report Config1": {
       "main": [
         [
           {
-            "node": "Aggregate",
+            "node": "3. Fetch Completed Tasks1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Aggregate": {
+    "3. Fetch Completed Tasks1": {
+      "main": [
+        [
+          {
+            "node": "4. Check Has Tasks1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Check Has Tasks1": {
+      "main": [
+        [
+          {
+            "node": "5. Sort Tasks by Points1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "12b. No Tasks Log1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Sort Tasks by Points1": {
+      "main": [
+        [
+          {
+            "node": "6. Combine Tasks Array1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Combine Tasks Array1": {
+      "main": [
+        [
+          {
+            "node": "7. Build AI Prompt1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7. Build AI Prompt1": {
       "main": [
         [
           {
@@ -152,11 +394,44 @@
         ]
       ]
     },
+    "9. Extract AI Text1": {
+      "main": [
+        [
+          {
+            "node": "10. Parse JSON Safety1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10. Parse JSON Safety1": {
+      "main": [
+        [
+          {
+            "node": "11. Save Weekly Report1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11. Save Weekly Report1": {
+      "main": [
+        [
+          {
+            "node": "12. Audit Success Log1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Message a model": {
       "main": [
         [
           {
-            "node": "Execute a SQL query1",
+            "node": "9. Extract AI Text1",
             "type": "main",
             "index": 0
           }
@@ -169,12 +444,12 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "f57676d4-269c-4fb4-a24e-40479b4a057f",
+  "versionId": "4b2643e2-193e-4500-bde1-09b0f4fcdf6f",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "ba2ff6236c53cc3094a25409901a5f23d54d6d0427ae4975062e6154d2291e5f"
   },
   "nodeGroups": [],
-  "id": "iJoDHliukmwmIs6D",
+  "id": "liMnHpPcYQ3hFgbI",
   "tags": []
 }
