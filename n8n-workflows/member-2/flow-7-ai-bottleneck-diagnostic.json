@@ -16,7 +16,10 @@
       "name": "Schedule - Every 4 Hours",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [200, 300]
+      "position": [
+        200,
+        300
+      ]
     },
     {
       "parameters": {},
@@ -24,7 +27,10 @@
       "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [200, 500]
+      "position": [
+        200,
+        500
+      ]
     },
     {
       "parameters": {
@@ -38,7 +44,11 @@
       "name": "HTTP - Collect All Data",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 400]
+      "position": [
+        460,
+        400
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -68,17 +78,23 @@
       "name": "IF - Has Data",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [700, 400]
+      "position": [
+        700,
+        400
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// ===== NODE 5: Phân tích Bottleneck từ dữ liệu thô =====\nconst data = $input.first().json;\nconst tasks = data.tasks || [];\nconst members = data.members || [];\nconst stuckTasks = data.stuck_tasks || [];\nconst overdueTasks = data.overdue_tasks || [];\nconst projects = data.projects || [];\nconst recentDiagnostics = data.recent_diagnostics || [];\n\n// === 1. STUCK TASKS ANALYSIS ===\nconst stuckAnalysis = stuckTasks.map(t => {\n  const inactiveHours = parseFloat(t.inactive_hours) || 0;\n  let severity = 'MEDIUM';\n  if (inactiveHours >= 72 || t.priority === 'URGENT') severity = 'CRITICAL';\n  else if (inactiveHours >= 48 || t.priority === 'HIGH') severity = 'HIGH';\n  \n  const isOverdue = t.due_date ? new Date(t.due_date) < new Date() : false;\n  if (isOverdue) severity = 'CRITICAL';\n\n  return {\n    task_id: t.task_id,\n    title: t.title,\n    status: t.status,\n    priority: t.priority,\n    assignee_name: t.assignee_name || 'Chưa gán',\n    assignee_id: t.assignee_id,\n    project_name: t.project_name,\n    project_id: t.project_id,\n    inactive_hours: inactiveHours,\n    due_date: t.due_date,\n    is_overdue: isOverdue,\n    severity: severity\n  };\n});\n\n// === 2. OVERDUE TASKS ANALYSIS ===\nconst overdueAnalysis = overdueTasks.map(t => {\n  const overdueDays = parseFloat(t.overdue_days) || 0;\n  let severity = 'MEDIUM';\n  if (overdueDays >= 7 || t.priority === 'URGENT') severity = 'CRITICAL';\n  else if (overdueDays >= 3 || t.priority === 'HIGH') severity = 'HIGH';\n  else if (overdueDays >= 1) severity = 'MEDIUM';\n  else severity = 'LOW';\n\n  return {\n    task_id: t.task_id,\n    title: t.title,\n    status: t.status,\n    priority: t.priority,\n    assignee_name: t.assignee_name || 'Chưa gán',\n    assignee_id: t.assignee_id,\n    project_name: t.project_name,\n    project_id: t.project_id,\n    overdue_days: overdueDays,\n    due_date: t.due_date,\n    severity: severity\n  };\n});\n\n// === 3. MEMBER WORKLOAD ANALYSIS ===\nconst workloadAnalysis = members.map(m => {\n  const activeCount = parseInt(m.active_task_count) || 0;\n  const maxWorkload = parseInt(m.max_workload) || 5;\n  const utilizationRate = maxWorkload > 0 ? Math.round((activeCount / maxWorkload) * 100) : 0;\n  const overdueCount = parseInt(m.overdue_task_count) || 0;\n  const activePoints = parseInt(m.active_story_points) || 0;\n\n  let isOverloaded = false;\n  let severity = 'LOW';\n  if (activeCount > maxWorkload) {\n    isOverloaded = true;\n    severity = activeCount >= maxWorkload * 1.5 ? 'CRITICAL' : 'HIGH';\n  } else if (utilizationRate >= 80) {\n    severity = 'MEDIUM';\n  }\n\n  return {\n    member_id: m.member_id,\n    full_name: m.full_name,\n    email: m.email,\n    skills: m.skills,\n    max_workload: maxWorkload,\n    active_task_count: activeCount,\n    completed_task_count: parseInt(m.completed_task_count) || 0,\n    overdue_task_count: overdueCount,\n    active_story_points: activePoints,\n    utilization_rate: utilizationRate,\n    is_overloaded: isOverloaded,\n    productivity_score: parseFloat(m.productivity_score) || 100,\n    severity: severity\n  };\n});\n\n// === 4. WORKLOAD IMBALANCE ANALYSIS ===\nconst taskCounts = workloadAnalysis.map(m => m.active_task_count);\nconst avgTasks = taskCounts.length > 0 ? taskCounts.reduce((a, b) => a + b, 0) / taskCounts.length : 0;\nconst maxTasks = Math.max(...taskCounts, 0);\nconst minTasks = Math.min(...taskCounts, 0);\nconst imbalanceRatio = avgTasks > 0 ? Math.round(((maxTasks - minTasks) / avgTasks) * 100) : 0;\n\nlet imbalanceSeverity = 'LOW';\nif (imbalanceRatio >= 150) imbalanceSeverity = 'CRITICAL';\nelse if (imbalanceRatio >= 100) imbalanceSeverity = 'HIGH';\nelse if (imbalanceRatio >= 50) imbalanceSeverity = 'MEDIUM';\n\n// === 5. PROJECT HEALTH SUMMARY ===\nconst projectHealth = projects.map(p => {\n  const totalTasks = parseInt(p.total_tasks) || 0;\n  const doneTasks = parseInt(p.done_tasks) || 0;\n  const bottleneckTasks = parseInt(p.bottleneck_tasks) || 0;\n  const overduePTasks = parseInt(p.overdue_tasks) || 0;\n  const completionRate = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;\n  const bottleneckRate = totalTasks > 0 ? Math.round((bottleneckTasks / totalTasks) * 100) : 0;\n\n  return {\n    project_id: p.project_id,\n    project_name: p.name,\n    status: p.status,\n    deadline: p.deadline,\n    total_tasks: totalTasks,\n    done_tasks: doneTasks,\n    in_progress_tasks: parseInt(p.in_progress_tasks) || 0,\n    todo_tasks: parseInt(p.todo_tasks) || 0,\n    bottleneck_tasks: bottleneckTasks,\n    overdue_tasks: overduePTasks,\n    completion_rate: completionRate,\n    bottleneck_rate: bottleneckRate\n  };\n});\n\n// === BUILD ISSUES LIST ===\nconst issues = [];\n\n// Stuck tasks issues\nif (stuckAnalysis.length > 0) {\n  const worstSeverity = stuckAnalysis.some(t => t.severity === 'CRITICAL') ? 'CRITICAL' :\n                        stuckAnalysis.some(t => t.severity === 'HIGH') ? 'HIGH' : 'MEDIUM';\n  issues.push({\n    type: 'STUCK_TASKS',\n    severity: worstSeverity,\n    count: stuckAnalysis.length,\n    details: stuckAnalysis\n  });\n}\n\n// Overdue tasks issues\nif (overdueAnalysis.length > 0) {\n  const worstSeverity = overdueAnalysis.some(t => t.severity === 'CRITICAL') ? 'CRITICAL' :\n                        overdueAnalysis.some(t => t.severity === 'HIGH') ? 'HIGH' : 'MEDIUM';\n  issues.push({\n    type: 'OVERDUE_DEADLINE',\n    severity: worstSeverity,\n    count: overdueAnalysis.length,\n    details: overdueAnalysis\n  });\n}\n\n// Member overload issues\nconst overloadedMembers = workloadAnalysis.filter(m => m.is_overloaded);\nif (overloadedMembers.length > 0) {\n  const worstSeverity = overloadedMembers.some(m => m.severity === 'CRITICAL') ? 'CRITICAL' : 'HIGH';\n  issues.push({\n    type: 'MEMBER_OVERLOAD',\n    severity: worstSeverity,\n    count: overloadedMembers.length,\n    details: overloadedMembers\n  });\n}\n\n// Workload imbalance issue\nif (imbalanceRatio >= 50 && members.length >= 2) {\n  issues.push({\n    type: 'WORKLOAD_IMBALANCE',\n    severity: imbalanceSeverity,\n    count: 1,\n    details: {\n      avg_tasks: Math.round(avgTasks * 10) / 10,\n      max_tasks: maxTasks,\n      min_tasks: minTasks,\n      imbalance_ratio: imbalanceRatio,\n      member_workloads: workloadAnalysis\n    }\n  });\n}\n\n// Filter out already diagnosed issues (from recent diagnostics)\nconst recentTypes = recentDiagnostics.map(d => d.diagnostic_type);\nconst newIssues = issues.filter(i => {\n  // Cho phép diagnose lại nếu severity tăng\n  const recentSame = recentDiagnostics.find(d => d.diagnostic_type === i.type);\n  if (!recentSame) return true;\n  const severityOrder = { 'LOW': 0, 'MEDIUM': 1, 'HIGH': 2, 'CRITICAL': 3 };\n  return severityOrder[i.severity] > severityOrder[recentSame.severity];\n});\n\nreturn [{\n  json: {\n    has_issues: newIssues.length > 0,\n    total_issues: newIssues.length,\n    issues: newIssues,\n    all_analysis: {\n      stuck_tasks: stuckAnalysis,\n      overdue_tasks: overdueAnalysis,\n      workload: workloadAnalysis,\n      project_health: projectHealth,\n      imbalance: {\n        ratio: imbalanceRatio,\n        severity: imbalanceSeverity,\n        avg_tasks: Math.round(avgTasks * 10) / 10,\n        max_tasks: maxTasks,\n        min_tasks: minTasks\n      }\n    },\n    raw_summary: data.summary,\n    analyzed_at: new Date().toISOString()\n  }\n}];"
+        "jsCode": "// ===== NODE 5: Phân tích Bottleneck từ dữ liệu thô =====\nconst data = $input.first().json;\nconst tasks = data.tasks || [];\nconst members = data.members || [];\nconst stuckTasks = data.stuck_tasks || [];\nconst overdueTasks = data.overdue_tasks || [];\nconst projects = data.projects || [];\nconst recentDiagnostics = data.recent_diagnostics || [];\n\n// === 1. STUCK TASKS ANALYSIS ===\nconst stuckAnalysis = stuckTasks.map(t => {\n  const inactiveHours = parseFloat(t.inactive_hours) || 0;\n  let severity = 'MEDIUM';\n  if (inactiveHours >= 72 || t.priority === 'URGENT') severity = 'CRITICAL';\n  else if (inactiveHours >= 48 || t.priority === 'HIGH') severity = 'HIGH';\n  \n  const isOverdue = t.due_date ? new Date(t.due_date) < new Date() : false;\n  if (isOverdue) severity = 'CRITICAL';\n\n  return {\n    task_id: t.task_id,\n    title: t.title,\n    status: t.status,\n    priority: t.priority,\n    assignee_name: t.assignee_name || 'Chưa gán',\n    assignee_id: t.assignee_id,\n    project_name: t.project_name,\n    project_id: t.project_id,\n    inactive_hours: inactiveHours,\n    due_date: t.due_date,\n    is_overdue: isOverdue,\n    severity: severity\n  };\n});\n\n// === 2. OVERDUE TASKS ANALYSIS ===\nconst overdueAnalysis = overdueTasks.map(t => {\n  const overdueDays = parseFloat(t.overdue_days) || 0;\n  let severity = 'MEDIUM';\n  if (overdueDays >= 7 || t.priority === 'URGENT') severity = 'CRITICAL';\n  else if (overdueDays >= 3 || t.priority === 'HIGH') severity = 'HIGH';\n  else if (overdueDays >= 1) severity = 'MEDIUM';\n  else severity = 'LOW';\n\n  return {\n    task_id: t.task_id,\n    title: t.title,\n    status: t.status,\n    priority: t.priority,\n    assignee_name: t.assignee_name || 'Chưa gán',\n    assignee_id: t.assignee_id,\n    project_name: t.project_name,\n    project_id: t.project_id,\n    overdue_days: overdueDays,\n    due_date: t.due_date,\n    severity: severity\n  };\n});\n\n// === 3. MEMBER WORKLOAD ANALYSIS ===\nconst workloadAnalysis = members.map(m => {\n  const activeCount = parseInt(m.active_task_count) || 0;\n  const maxWorkload = parseInt(m.max_workload) || 5;\n  const utilizationRate = maxWorkload > 0 ? Math.round((activeCount / maxWorkload) * 100) : 0;\n  const overdueCount = parseInt(m.overdue_task_count) || 0;\n  const activePoints = parseInt(m.active_story_points) || 0;\n\n  let isOverloaded = false;\n  let severity = 'LOW';\n  if (activeCount > maxWorkload) {\n    isOverloaded = true;\n    severity = activeCount >= maxWorkload * 1.5 ? 'CRITICAL' : 'HIGH';\n  } else if (utilizationRate >= 80) {\n    severity = 'MEDIUM';\n  }\n\n  return {\n    member_id: m.member_id,\n    full_name: m.full_name,\n    email: m.email,\n    skills: m.skills,\n    max_workload: maxWorkload,\n    active_task_count: activeCount,\n    completed_task_count: parseInt(m.completed_task_count) || 0,\n    overdue_task_count: overdueCount,\n    active_story_points: activePoints,\n    utilization_rate: utilizationRate,\n    is_overloaded: isOverloaded,\n    productivity_score: parseFloat(m.productivity_score) || 100,\n    severity: severity\n  };\n});\n\n// === 4. WORKLOAD IMBALANCE ANALYSIS ===\nconst taskCounts = workloadAnalysis.map(m => m.active_task_count);\nconst avgTasks = taskCounts.length > 0 ? taskCounts.reduce((a, b) => a + b, 0) / taskCounts.length : 0;\nconst maxTasks = Math.max(...taskCounts, 0);\nconst minTasks = taskCounts.length > 0 ? Math.min(...taskCounts) : 0;\nconst imbalanceRatio = avgTasks > 0 ? Math.round(((maxTasks - minTasks) / avgTasks) * 100) : 0;\n\nlet imbalanceSeverity = 'LOW';\nif (imbalanceRatio >= 150) imbalanceSeverity = 'CRITICAL';\nelse if (imbalanceRatio >= 100) imbalanceSeverity = 'HIGH';\nelse if (imbalanceRatio >= 50) imbalanceSeverity = 'MEDIUM';\n\n// === 5. PROJECT HEALTH SUMMARY ===\nconst projectHealth = projects.map(p => {\n  const totalTasks = parseInt(p.total_tasks) || 0;\n  const doneTasks = parseInt(p.done_tasks) || 0;\n  const bottleneckTasks = parseInt(p.bottleneck_tasks) || 0;\n  const overduePTasks = parseInt(p.overdue_tasks) || 0;\n  const completionRate = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;\n  const bottleneckRate = totalTasks > 0 ? Math.round((bottleneckTasks / totalTasks) * 100) : 0;\n\n  return {\n    project_id: p.project_id,\n    project_name: p.name,\n    status: p.status,\n    deadline: p.deadline,\n    total_tasks: totalTasks,\n    done_tasks: doneTasks,\n    in_progress_tasks: parseInt(p.in_progress_tasks) || 0,\n    todo_tasks: parseInt(p.todo_tasks) || 0,\n    bottleneck_tasks: bottleneckTasks,\n    overdue_tasks: overduePTasks,\n    completion_rate: completionRate,\n    bottleneck_rate: bottleneckRate\n  };\n});\n\nconst singleProjectId = taskList => {\n  const projectIds = [...new Set(taskList.map(task => task.project_id).filter(Boolean))];\n  return projectIds.length === 1 ? projectIds[0] : null;\n};\n\n// === BUILD ISSUES LIST ===\nconst issues = [];\n\n// Stuck tasks issues\nif (stuckAnalysis.length > 0) {\n  const worstSeverity = stuckAnalysis.some(t => t.severity === 'CRITICAL') ? 'CRITICAL' :\n                        stuckAnalysis.some(t => t.severity === 'HIGH') ? 'HIGH' : 'MEDIUM';\n  issues.push({\n    type: 'STUCK_TASKS',\n    project_id: singleProjectId(stuckAnalysis),\n    severity: worstSeverity,\n    count: stuckAnalysis.length,\n    details: stuckAnalysis\n  });\n}\n\n// Overdue tasks issues\nif (overdueAnalysis.length > 0) {\n  const worstSeverity = overdueAnalysis.some(t => t.severity === 'CRITICAL') ? 'CRITICAL' :\n                        overdueAnalysis.some(t => t.severity === 'HIGH') ? 'HIGH' : 'MEDIUM';\n  issues.push({\n    type: 'OVERDUE_DEADLINE',\n    project_id: singleProjectId(overdueAnalysis),\n    severity: worstSeverity,\n    count: overdueAnalysis.length,\n    details: overdueAnalysis\n  });\n}\n\n// Member overload issues\nconst overloadedMembers = workloadAnalysis.filter(m => m.is_overloaded);\nif (overloadedMembers.length > 0) {\n  const worstSeverity = overloadedMembers.some(m => m.severity === 'CRITICAL') ? 'CRITICAL' : 'HIGH';\n  issues.push({\n    type: 'MEMBER_OVERLOAD',\n    severity: worstSeverity,\n    count: overloadedMembers.length,\n    details: overloadedMembers\n  });\n}\n\n// Workload imbalance issue\nif (imbalanceRatio >= 50 && members.length >= 2) {\n  issues.push({\n    type: 'WORKLOAD_IMBALANCE',\n    severity: imbalanceSeverity,\n    count: 1,\n    details: {\n      avg_tasks: Math.round(avgTasks * 10) / 10,\n      max_tasks: maxTasks,\n      min_tasks: minTasks,\n      imbalance_ratio: imbalanceRatio,\n      member_workloads: workloadAnalysis\n    }\n  });\n}\n\n// Filter out already diagnosed issues (from recent diagnostics)\nconst recentTypes = recentDiagnostics.map(d => d.diagnostic_type);\nconst newIssues = issues.filter(i => {\n  // Cho phép diagnose lại nếu severity tăng\n  const recentSame = recentDiagnostics.find(d =>\n    d.diagnostic_type === i.type && (d.project_id || null) === (i.project_id || null)\n  );\n  if (!recentSame) return true;\n  const severityOrder = { 'LOW': 0, 'MEDIUM': 1, 'HIGH': 2, 'CRITICAL': 3 };\n  return severityOrder[i.severity] > severityOrder[recentSame.severity];\n});\n\nreturn [{\n  json: {\n    has_issues: newIssues.length > 0,\n    total_issues: newIssues.length,\n    issues: newIssues,\n    all_analysis: {\n      tasks: tasks,\n      stuck_tasks: stuckAnalysis,\n      overdue_tasks: overdueAnalysis,\n      workload: workloadAnalysis,\n      project_health: projectHealth,\n      imbalance: {\n        ratio: imbalanceRatio,\n        severity: imbalanceSeverity,\n        avg_tasks: Math.round(avgTasks * 10) / 10,\n        max_tasks: maxTasks,\n        min_tasks: minTasks\n      }\n    },\n    raw_summary: data.summary,\n    analyzed_at: new Date().toISOString()\n  }\n}];"
       },
       "id": "f7-node-005",
       "name": "Code - Analyze Bottlenecks",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [940, 300]
+      "position": [
+        940,
+        300
+      ]
     },
     {
       "parameters": {
@@ -108,17 +124,23 @@
       "name": "IF - Has Issues",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1180, 300]
+      "position": [
+        1180,
+        300
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// ===== NODE 7: Chuẩn bị prompt cho AI =====\nconst data = $input.first().json;\nconst issues = data.issues;\nconst analysis = data.all_analysis;\n\n// Build context string cho AI\nlet context = '=== DỮ LIỆU PHÂN TÍCH BOTTLENECK CỦA DỰ ÁN ===\\n\\n';\n\n// 1. Stuck Tasks\nif (analysis.stuck_tasks.length > 0) {\n  context += '--- TASK BỊ STUCK (Không cập nhật > 24 giờ) ---\\n';\n  analysis.stuck_tasks.forEach((t, i) => {\n    context += `${i+1}. \"${t.title}\" - Status: ${t.status}, Priority: ${t.priority}, `;\n    context += `Assignee: ${t.assignee_name}, Inactive: ${t.inactive_hours} giờ`;\n    if (t.is_overdue) context += ' [ĐÃ QUÁ HẠN!]';\n    context += `\\n`;\n  });\n  context += '\\n';\n}\n\n// 2. Overdue Tasks\nif (analysis.overdue_tasks.length > 0) {\n  context += '--- TASK QUÁ HẠN ---\\n';\n  analysis.overdue_tasks.forEach((t, i) => {\n    context += `${i+1}. \"${t.title}\" - Status: ${t.status}, Priority: ${t.priority}, `;\n    context += `Assignee: ${t.assignee_name}, Quá hạn: ${t.overdue_days} ngày\\n`;\n  });\n  context += '\\n';\n}\n\n// 3. Member Workload\ncontext += '--- WORKLOAD CỦA CÁC THÀNH VIÊN ---\\n';\nanalysis.workload.forEach((m, i) => {\n  context += `${i+1}. ${m.full_name}: ${m.active_task_count}/${m.max_workload} tasks `;\n  context += `(${m.utilization_rate}% utilization), ${m.overdue_task_count} overdue, `;\n  context += `${m.active_story_points} story points`;\n  if (m.is_overloaded) context += ' [QUÁ TẢI!]';\n  context += `\\n`;\n});\ncontext += '\\n';\n\n// 4. Workload Imbalance\ncontext += `--- CÂN BẰNG WORKLOAD ---\\n`;\ncontext += `Trung bình: ${analysis.imbalance.avg_tasks} tasks/member, `;\ncontext += `Cao nhất: ${analysis.imbalance.max_tasks}, Thấp nhất: ${analysis.imbalance.min_tasks}, `;\ncontext += `Tỷ lệ mất cân bằng: ${analysis.imbalance.ratio}%\\n\\n`;\n\n// 5. Project Health\ncontext += '--- SỨC KHỎE DỰ ÁN ---\\n';\nanalysis.project_health.forEach((p, i) => {\n  context += `${i+1}. \"${p.project_name}\" - Completion: ${p.completion_rate}%, `;\n  context += `Bottleneck: ${p.bottleneck_tasks}/${p.total_tasks} tasks, `;\n  context += `Overdue: ${p.overdue_tasks} tasks, Deadline: ${p.deadline}\\n`;\n});\n\n// Build issues summary\nlet issuesSummary = '\\n=== CÁC VẤN ĐỀ PHÁT HIỆN ===\\n';\nissues.forEach((issue, i) => {\n  issuesSummary += `${i+1}. [${issue.severity}] ${issue.type}: ${issue.count} items\\n`;\n});\n\nconst prompt = `Bạn là AI Bottleneck Diagnostic Expert cho hệ thống quản lý dự án.\n\nDựa trên dữ liệu thực tế sau, hãy phân tích chi tiết các bottleneck và đưa ra giải pháp.\n\n${context}\n${issuesSummary}\n\nHãy trả về KẾT QUẢ PHÂN TÍCH dưới dạng JSON array, mỗi phần tử là một diagnostic report theo format SAU (KHÔNG thêm markdown, KHÔNG thêm text ngoài JSON):\n\n[\n  {\n    \"diagnostic_type\": \"STUCK_TASKS | OVERDUE_DEADLINE | MEMBER_OVERLOAD | WORKLOAD_IMBALANCE\",\n    \"severity\": \"LOW | MEDIUM | HIGH | CRITICAL\",\n    \"title\": \"Tiêu đề ngắn gọn mô tả vấn đề (tiếng Việt)\",\n    \"description\": \"Phân tích chi tiết nguyên nhân gốc rễ (root cause) của vấn đề (tiếng Việt)\",\n    \"evidence\": [\n      { \"type\": \"metric\", \"detail\": \"Mô tả bằng chứng cụ thể\" }\n    ],\n    \"recommendations\": [\n      { \"action\": \"Hành động cụ thể cần thực hiện\", \"priority\": \"HIGH\", \"detail\": \"Chi tiết cách thực hiện\" }\n    ],\n    \"affected_tasks\": [\n      { \"task_id\": \"uuid-of-task\", \"title\": \"Tên task\" }\n    ],\n    \"affected_members\": [\n      { \"member_id\": \"uuid-of-member\", \"name\": \"Tên member\" }\n    ]\n  }\n]\n\nLưu ý:\n- Chỉ tạo diagnostic cho các vấn đề thực sự nghiêm trọng, không tạo nếu mọi thứ bình thường.\n- Mỗi diagnostic phải có ít nhất 1 evidence và 1 recommendation.\n- severity phải phản ánh đúng mức độ nghiêm trọng dựa trên dữ liệu.\n- affected_tasks và affected_members phải chứa ID thực từ dữ liệu được cung cấp.\n- Trả về JSON array THUẦN TÚY, không có markdown code block, không có text giải thích.`;\n\nreturn [{\n  json: {\n    prompt: prompt,\n    issues: issues,\n    analysis: analysis,\n    raw_summary: data.raw_summary\n  }\n}];"
+        "jsCode": "// ===== NODE 7: Chuẩn bị prompt cho AI =====\nconst data = $input.first().json;\nconst issues = data.issues;\nconst analysis = data.all_analysis;\n\n// Build context string cho AI\nlet context = '=== DỮ LIỆU PHÂN TÍCH BOTTLENECK CỦA DỰ ÁN ===\\n\\n';\n\n// 1. Stuck Tasks\nif (analysis.stuck_tasks.length > 0) {\n  context += '--- TASK BỊ STUCK (Không cập nhật > 24 giờ) ---\\n';\n  analysis.stuck_tasks.forEach((t, i) => {\n    context += `${i+1}. task_id=${t.task_id} project_id=${t.project_id} project=${t.project_name} \"${t.title}\" - Status: ${t.status}, Priority: ${t.priority}, `;\n    context += `Assignee: ${t.assignee_name}, Inactive: ${t.inactive_hours} giờ`;\n    if (t.is_overdue) context += ' [ĐÃ QUÁ HẠN!]';\n    context += `\\n`;\n  });\n  context += '\\n';\n}\n\n// 2. Overdue Tasks\nif (analysis.overdue_tasks.length > 0) {\n  context += '--- TASK QUÁ HẠN ---\\n';\n  analysis.overdue_tasks.forEach((t, i) => {\n    context += `${i+1}. \"${t.title}\" - Status: ${t.status}, Priority: ${t.priority}, `;\n    context += `Assignee: ${t.assignee_name}, Quá hạn: ${t.overdue_days} ngày\\n`;\n  });\n  context += '\\n';\n}\n\n// 3. Member Workload\ncontext += '--- WORKLOAD CỦA CÁC THÀNH VIÊN ---\\n';\nanalysis.workload.forEach((m, i) => {\n  context += `${i+1}. member_id=${m.member_id} ${m.full_name}: ${m.active_task_count}/${m.max_workload} tasks `;\n  context += `(${m.utilization_rate}% utilization), ${m.overdue_task_count} overdue, `;\n  context += `${m.active_story_points} story points`;\n  if (m.is_overloaded) context += ' [QUÁ TẢI!]';\n  context += `\\n`;\n});\ncontext += '\\n';\n\n// 4. Workload Imbalance\ncontext += `--- CÂN BẰNG WORKLOAD ---\\n`;\ncontext += `Trung bình: ${analysis.imbalance.avg_tasks} tasks/member, `;\ncontext += `Cao nhất: ${analysis.imbalance.max_tasks}, Thấp nhất: ${analysis.imbalance.min_tasks}, `;\ncontext += `Tỷ lệ mất cân bằng: ${analysis.imbalance.ratio}%\\n\\n`;\n\n// 5. Project Health\ncontext += '--- SỨC KHỎE DỰ ÁN ---\\n';\nanalysis.project_health.forEach((p, i) => {\n  context += `${i+1}. \"${p.project_name}\" - Completion: ${p.completion_rate}%, `;\n  context += `Bottleneck: ${p.bottleneck_tasks}/${p.total_tasks} tasks, `;\n  context += `Overdue: ${p.overdue_tasks} tasks, Deadline: ${p.deadline}\\n`;\n});\n\n// Build issues summary\nlet issuesSummary = '\\n=== CÁC VẤN ĐỀ PHÁT HIỆN ===\\n';\nissues.forEach((issue, i) => {\n  issuesSummary += `${i+1}. [${issue.severity}] ${issue.type}: ${issue.count} items\\n`;\n});\n\nconst prompt = `Bạn là AI Bottleneck Diagnostic Expert cho hệ thống quản lý dự án.\n\nDựa trên dữ liệu thực tế sau, hãy phân tích chi tiết các bottleneck và đưa ra giải pháp.\n\n${context}\n${issuesSummary}\n\nHãy trả về KẾT QUẢ PHÂN TÍCH dưới dạng JSON array, mỗi phần tử là một diagnostic report theo format SAU (KHÔNG thêm markdown, KHÔNG thêm text ngoài JSON):\n\n[\n  {\n    \"diagnostic_type\": \"STUCK_TASKS | OVERDUE_DEADLINE | MEMBER_OVERLOAD | WORKLOAD_IMBALANCE\",\n    \"severity\": \"LOW | MEDIUM | HIGH | CRITICAL\",\n    \"title\": \"Tiêu đề ngắn gọn mô tả vấn đề (tiếng Việt)\",\n    \"description\": \"Phân tích chi tiết nguyên nhân gốc rễ (root cause) của vấn đề (tiếng Việt)\",\n    \"evidence\": [\n      { \"type\": \"metric\", \"detail\": \"Mô tả bằng chứng cụ thể\" }\n    ],\n    \"recommendations\": [\n      { \"action\": \"Hành động cụ thể cần thực hiện\", \"priority\": \"HIGH\", \"detail\": \"Chi tiết cách thực hiện\" }\n    ],\n    \"affected_tasks\": [\n      { \"task_id\": \"uuid-of-task\", \"title\": \"Tên task\" }\n    ],\n    \"affected_members\": [\n      { \"member_id\": \"uuid-of-member\", \"name\": \"Tên member\" }\n    ]\n  }\n]\n\nLưu ý:\n- Chỉ tạo diagnostic cho các vấn đề thực sự nghiêm trọng, không tạo nếu mọi thứ bình thường.\n- Mỗi diagnostic phải có ít nhất 1 evidence và 1 recommendation.\n- severity phải phản ánh đúng mức độ nghiêm trọng dựa trên dữ liệu.\n- affected_tasks và affected_members phải chứa ID thực từ dữ liệu được cung cấp.\n- Trả về JSON array THUẦN TÚY, không có markdown code block, không có text giải thích.`;\n\nreturn [{\n  json: {\n    prompt: prompt,\n    issues: issues,\n    analysis: analysis,\n    raw_summary: data.raw_summary\n  }\n}];"
       },
       "id": "f7-node-007",
       "name": "Code - Build AI Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1420, 200]
+      "position": [
+        1420,
+        200
+      ]
     },
     {
       "parameters": {
@@ -128,7 +150,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: 'google/gemini-2.0-flash-001', messages: [ { role: 'system', content: 'Bạn là AI chuyên phân tích bottleneck trong quản lý dự án. Luôn trả về JSON array thuần túy, không markdown.' }, { role: 'user', content: $json.prompt } ], temperature: 0.3, max_tokens: 4000 }) }}",
+        "jsonBody": "={{ JSON.stringify({ model: 'google/gemini-2.5-flash', messages: [ { role: 'system', content: 'Bạn là AI chuyên phân tích bottleneck trong quản lý dự án. Luôn trả về JSON array thuần túy, không markdown.' }, { role: 'user', content: $json.prompt } ], temperature: 0.3, max_tokens: 4000 }) }}",
         "options": {
           "timeout": 30000
         }
@@ -137,23 +159,30 @@
       "name": "HTTP - AI Analysis (OpenRouter)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1680, 200],
+      "position": [
+        1680,
+        200
+      ],
       "credentials": {
         "httpHeaderAuth": {
           "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
           "name": "OpenRouter API Key"
         }
-      }
+      },
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "jsCode": "// ===== NODE 9: Parse và validate AI response =====\nconst input = $input.first().json;\nconst issues = $('Code - Build AI Prompt').first().json.issues;\nconst analysis = $('Code - Build AI Prompt').first().json.analysis;\n\ntry {\n  // Lấy content từ AI response\n  let aiContent = '';\n  if (input.choices && input.choices.length > 0) {\n    aiContent = input.choices[0].message?.content || '';\n  } else if (input.message?.content) {\n    aiContent = input.message.content;\n  } else if (typeof input === 'string') {\n    aiContent = input;\n  }\n\n  if (!aiContent || aiContent.trim().length === 0) {\n    throw new Error('AI trả về response rỗng');\n  }\n\n  // Clean markdown code blocks nếu có\n  let cleanContent = aiContent.trim();\n  if (cleanContent.startsWith('```json')) {\n    cleanContent = cleanContent.replace(/^```json\\s*/, '').replace(/```\\s*$/, '');\n  } else if (cleanContent.startsWith('```')) {\n    cleanContent = cleanContent.replace(/^```\\s*/, '').replace(/```\\s*$/, '');\n  }\n  cleanContent = cleanContent.trim();\n\n  // Parse JSON\n  let diagnostics = JSON.parse(cleanContent);\n\n  // Ensure it's an array\n  if (!Array.isArray(diagnostics)) {\n    if (diagnostics.diagnostics && Array.isArray(diagnostics.diagnostics)) {\n      diagnostics = diagnostics.diagnostics;\n    } else {\n      diagnostics = [diagnostics];\n    }\n  }\n\n  // Validate each diagnostic\n  const validTypes = ['STUCK_TASKS', 'OVERDUE_DEADLINE', 'MEMBER_OVERLOAD', 'WORKLOAD_IMBALANCE', 'GENERAL'];\n  const validSeverities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];\n\n  const validDiagnostics = diagnostics\n    .filter(d => d && typeof d === 'object')\n    .map(d => {\n      // Normalize type\n      let diagType = (d.diagnostic_type || 'GENERAL').toUpperCase();\n      if (!validTypes.includes(diagType)) diagType = 'GENERAL';\n\n      // Normalize severity\n      let severity = (d.severity || 'MEDIUM').toUpperCase();\n      if (!validSeverities.includes(severity)) severity = 'MEDIUM';\n\n      return {\n        diagnostic_type: diagType,\n        severity: severity,\n        title: d.title || 'Bottleneck detected',\n        description: d.description || 'No description provided',\n        evidence: Array.isArray(d.evidence) ? d.evidence : [],\n        recommendations: Array.isArray(d.recommendations) ? d.recommendations : [],\n        affected_tasks: Array.isArray(d.affected_tasks) ? d.affected_tasks : [],\n        affected_members: Array.isArray(d.affected_members) ? d.affected_members : []\n      };\n    })\n    .filter(d => d.title && d.description);\n\n  if (validDiagnostics.length === 0) {\n    throw new Error('Không có diagnostic hợp lệ sau khi validate');\n  }\n\n  return [{\n    json: {\n      parse_success: true,\n      diagnostics: validDiagnostics,\n      diagnostics_count: validDiagnostics.length,\n      ai_raw_response: aiContent\n    }\n  }];\n\n} catch (error) {\n  // Fallback: tạo diagnostic từ dữ liệu phân tích (không cần AI)\n  const fallbackDiagnostics = [];\n\n  issues.forEach(issue => {\n    const diag = {\n      diagnostic_type: issue.type,\n      severity: issue.severity,\n      title: '',\n      description: '',\n      evidence: [],\n      recommendations: [],\n      affected_tasks: [],\n      affected_members: []\n    };\n\n    switch (issue.type) {\n      case 'STUCK_TASKS':\n        diag.title = `${issue.count} task(s) bị stuck cần xử lý`;\n        diag.description = `Phát hiện ${issue.count} task không có hoạt động trong hơn 24 giờ.`;\n        diag.evidence = issue.details.map(t => ({\n          type: 'stuck_task',\n          detail: `Task \"${t.title}\" - inactive ${t.inactive_hours} giờ (${t.status})`\n        }));\n        diag.recommendations = [{ action: 'Review và reassign các task bị stuck', priority: 'HIGH', detail: 'Liên hệ assignee để xác nhận tình trạng' }];\n        diag.affected_tasks = issue.details.map(t => ({ task_id: t.task_id, title: t.title }));\n        diag.affected_members = [...new Map(issue.details.filter(t => t.assignee_id).map(t => [t.assignee_id, { member_id: t.assignee_id, name: t.assignee_name }])).values()];\n        break;\n      case 'OVERDUE_DEADLINE':\n        diag.title = `${issue.count} task(s) đã quá hạn deadline`;\n        diag.description = `Phát hiện ${issue.count} task đã vượt quá deadline mà chưa hoàn thành.`;\n        diag.evidence = issue.details.map(t => ({\n          type: 'overdue',\n          detail: `Task \"${t.title}\" - quá hạn ${t.overdue_days} ngày (${t.status})`\n        }));\n        diag.recommendations = [{ action: 'Ưu tiên hoàn thành các task quá hạn', priority: 'CRITICAL', detail: 'Xem xét reassign hoặc giảm scope' }];\n        diag.affected_tasks = issue.details.map(t => ({ task_id: t.task_id, title: t.title }));\n        diag.affected_members = [...new Map(issue.details.filter(t => t.assignee_id).map(t => [t.assignee_id, { member_id: t.assignee_id, name: t.assignee_name }])).values()];\n        break;\n      case 'MEMBER_OVERLOAD':\n        diag.title = `${issue.count} thành viên bị quá tải`;\n        diag.description = `Phát hiện ${issue.count} thành viên có số task vượt quá giới hạn workload.`;\n        diag.evidence = issue.details.map(m => ({\n          type: 'overload',\n          detail: `${m.full_name}: ${m.active_task_count}/${m.max_workload} tasks (${m.utilization_rate}%)`\n        }));\n        diag.recommendations = [{ action: 'Phân bổ lại task cho các thành viên ít việc hơn', priority: 'HIGH', detail: 'Dùng Workload Balancer để cân bằng' }];\n        diag.affected_members = issue.details.map(m => ({ member_id: m.member_id, name: m.full_name }));\n        break;\n      case 'WORKLOAD_IMBALANCE':\n        diag.title = `Mất cân bằng workload nghiêm trọng (${issue.details.imbalance_ratio}%)`;\n        diag.description = `Workload phân bố không đều giữa các thành viên.`;\n        diag.evidence = [{\n          type: 'imbalance',\n          detail: `Trung bình ${issue.details.avg_tasks} tasks, cao nhất ${issue.details.max_tasks}, thấp nhất ${issue.details.min_tasks}`\n        }];\n        diag.recommendations = [{ action: 'Cân bằng lại workload giữa các thành viên', priority: 'MEDIUM', detail: 'Chuyển task từ người nhiều sang người ít' }];\n        diag.affected_members = (issue.details.member_workloads || []).map(m => ({ member_id: m.member_id, name: m.full_name }));\n        break;\n    }\n\n    fallbackDiagnostics.push(diag);\n  });\n\n  return [{\n    json: {\n      parse_success: false,\n      parse_error: error.message,\n      diagnostics: fallbackDiagnostics,\n      diagnostics_count: fallbackDiagnostics.length,\n      ai_raw_response: 'FALLBACK - AI parse failed: ' + error.message\n    }\n  }];\n}"
+        "jsCode": "// ===== NODE 9: Parse và validate AI response =====\nconst input = $input.first().json;\nconst issues = $('Code - Build AI Prompt').first().json.issues;\nconst analysis = $('Code - Build AI Prompt').first().json.analysis;\n\ntry {\n  // Lấy content từ AI response\n  let aiContent = '';\n  if (input.choices && input.choices.length > 0) {\n    aiContent = input.choices[0].message?.content || '';\n  } else if (input.message?.content) {\n    aiContent = input.message.content;\n  } else if (typeof input === 'string') {\n    aiContent = input;\n  }\n\n  if (!aiContent || aiContent.trim().length === 0) {\n    throw new Error('AI trả về response rỗng');\n  }\n\n  // Clean markdown code blocks nếu có\n  let cleanContent = aiContent.trim();\n  if (cleanContent.startsWith('```json')) {\n    cleanContent = cleanContent.replace(/^```json\\s*/, '').replace(/```\\s*$/, '');\n  } else if (cleanContent.startsWith('```')) {\n    cleanContent = cleanContent.replace(/^```\\s*/, '').replace(/```\\s*$/, '');\n  }\n  cleanContent = cleanContent.trim();\n\n  // Parse JSON\n  let diagnostics = JSON.parse(cleanContent);\n\n  // Ensure it's an array\n  if (!Array.isArray(diagnostics)) {\n    if (diagnostics.diagnostics && Array.isArray(diagnostics.diagnostics)) {\n      diagnostics = diagnostics.diagnostics;\n    } else {\n      diagnostics = [diagnostics];\n    }\n  }\n\n  // Validate each diagnostic\n  const validTypes = ['STUCK_TASKS', 'OVERDUE_DEADLINE', 'MEMBER_OVERLOAD', 'WORKLOAD_IMBALANCE', 'GENERAL'];\n  const validSeverities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];\n  const validTaskIds = new Set((analysis.tasks || []).map(task => task.task_id));\n  const validMemberIds = new Set((analysis.workload || []).map(member => member.member_id));\n\n  const validDiagnostics = diagnostics\n    .filter(d => d && typeof d === 'object')\n    .map(d => {\n      // Normalize type\n      let diagType = (d.diagnostic_type || 'GENERAL').toUpperCase();\n      if (!validTypes.includes(diagType)) diagType = 'GENERAL';\n\n      // Normalize severity\n      let severity = (d.severity || 'MEDIUM').toUpperCase();\n      if (!validSeverities.includes(severity)) severity = 'MEDIUM';\n\n      return {\n        diagnostic_type: diagType,\n        severity: severity,\n        title: d.title || 'Bottleneck detected',\n        description: d.description || 'No description provided',\n        evidence: Array.isArray(d.evidence) ? d.evidence : [],\n        recommendations: Array.isArray(d.recommendations) ? d.recommendations : [],\n        affected_tasks: Array.isArray(d.affected_tasks) ? d.affected_tasks.filter(task => task && validTaskIds.has(task.task_id)).map(task => ({ task_id: task.task_id, title: task.title || '' })) : [],\n        affected_members: Array.isArray(d.affected_members) ? d.affected_members.filter(member => member && validMemberIds.has(member.member_id)).map(member => ({ member_id: member.member_id, name: member.name || '' })) : []\n      };\n    })\n    .filter(d => typeof d.title === 'string' && d.title.trim() && typeof d.description === 'string' && d.description.trim() && d.evidence.length > 0 && d.recommendations.length > 0);\n\n  if (validDiagnostics.length === 0) {\n    throw new Error('Không có diagnostic hợp lệ sau khi validate');\n  }\n\n  return [{\n    json: {\n      parse_success: true,\n      diagnostics: validDiagnostics,\n      diagnostics_count: validDiagnostics.length,\n      ai_raw_response: aiContent\n    }\n  }];\n\n} catch (error) {\n  // Fallback: tạo diagnostic từ dữ liệu phân tích (không cần AI)\n  const fallbackDiagnostics = [];\n\n  issues.forEach(issue => {\n    const diag = {\n      diagnostic_type: issue.type,\n      severity: issue.severity,\n      title: '',\n      description: '',\n      evidence: [],\n      recommendations: [],\n      affected_tasks: [],\n      affected_members: []\n    };\n\n    switch (issue.type) {\n      case 'STUCK_TASKS':\n        diag.title = `${issue.count} task(s) bị stuck cần xử lý`;\n        diag.description = `Phát hiện ${issue.count} task không có hoạt động trong hơn 24 giờ.`;\n        diag.evidence = issue.details.map(t => ({\n          type: 'stuck_task',\n          detail: `Task \"${t.title}\" - inactive ${t.inactive_hours} giờ (${t.status})`\n        }));\n        diag.recommendations = [{ action: 'Review và reassign các task bị stuck', priority: 'HIGH', detail: 'Liên hệ assignee để xác nhận tình trạng' }];\n        diag.affected_tasks = issue.details.map(t => ({ task_id: t.task_id, title: t.title }));\n        diag.affected_members = [...new Map(issue.details.filter(t => t.assignee_id).map(t => [t.assignee_id, { member_id: t.assignee_id, name: t.assignee_name }])).values()];\n        break;\n      case 'OVERDUE_DEADLINE':\n        diag.title = `${issue.count} task(s) đã quá hạn deadline`;\n        diag.description = `Phát hiện ${issue.count} task đã vượt quá deadline mà chưa hoàn thành.`;\n        diag.evidence = issue.details.map(t => ({\n          type: 'overdue',\n          detail: `Task \"${t.title}\" - quá hạn ${t.overdue_days} ngày (${t.status})`\n        }));\n        diag.recommendations = [{ action: 'Ưu tiên hoàn thành các task quá hạn', priority: 'CRITICAL', detail: 'Xem xét reassign hoặc giảm scope' }];\n        diag.affected_tasks = issue.details.map(t => ({ task_id: t.task_id, title: t.title }));\n        diag.affected_members = [...new Map(issue.details.filter(t => t.assignee_id).map(t => [t.assignee_id, { member_id: t.assignee_id, name: t.assignee_name }])).values()];\n        break;\n      case 'MEMBER_OVERLOAD':\n        diag.title = `${issue.count} thành viên bị quá tải`;\n        diag.description = `Phát hiện ${issue.count} thành viên có số task vượt quá giới hạn workload.`;\n        diag.evidence = issue.details.map(m => ({\n          type: 'overload',\n          detail: `${m.full_name}: ${m.active_task_count}/${m.max_workload} tasks (${m.utilization_rate}%)`\n        }));\n        diag.recommendations = [{ action: 'Phân bổ lại task cho các thành viên ít việc hơn', priority: 'HIGH', detail: 'Dùng Workload Balancer để cân bằng' }];\n        diag.affected_members = issue.details.map(m => ({ member_id: m.member_id, name: m.full_name }));\n        break;\n      case 'WORKLOAD_IMBALANCE':\n        diag.title = `Mất cân bằng workload nghiêm trọng (${issue.details.imbalance_ratio}%)`;\n        diag.description = `Workload phân bố không đều giữa các thành viên.`;\n        diag.evidence = [{\n          type: 'imbalance',\n          detail: `Trung bình ${issue.details.avg_tasks} tasks, cao nhất ${issue.details.max_tasks}, thấp nhất ${issue.details.min_tasks}`\n        }];\n        diag.recommendations = [{ action: 'Cân bằng lại workload giữa các thành viên', priority: 'MEDIUM', detail: 'Chuyển task từ người nhiều sang người ít' }];\n        diag.affected_members = (issue.details.member_workloads || []).map(m => ({ member_id: m.member_id, name: m.full_name }));\n        break;\n    }\n\n    fallbackDiagnostics.push(diag);\n  });\n\n  return [{\n    json: {\n      parse_success: false,\n      parse_error: error.message,\n      diagnostics: fallbackDiagnostics,\n      diagnostics_count: fallbackDiagnostics.length,\n      ai_raw_response: 'FALLBACK - AI parse failed: ' + error.message\n    }\n  }];\n}"
       },
       "id": "f7-node-009",
       "name": "Code - Parse AI Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1920, 200]
+      "position": [
+        1920,
+        200
+      ]
     },
     {
       "parameters": {
@@ -183,17 +212,23 @@
       "name": "IF - Has Valid Diagnostics",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [2160, 200]
+      "position": [
+        2160,
+        200
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// ===== NODE 11: Split diagnostics thành individual items =====\n// Mỗi diagnostic cần được gửi riêng lẻ đến API\nconst data = $input.first().json;\nconst diagnostics = data.diagnostics;\nconst aiRawResponse = data.ai_raw_response;\nconst analysis = $('Code - Analyze Bottlenecks').first().json.all_analysis;\n\n// Lấy project_id đầu tiên từ analysis (hoặc từ affected tasks)\nconst defaultProjectId = analysis.project_health.length > 0 ? analysis.project_health[0].project_id : null;\n\nconst items = diagnostics.map(d => {\n  // Tìm project_id từ affected_tasks hoặc dùng default\n  let projectId = defaultProjectId;\n  if (d.affected_tasks && d.affected_tasks.length > 0) {\n    const taskProjectId = analysis.stuck_tasks\n      .concat(analysis.overdue_tasks)\n      .find(t => t.task_id === d.affected_tasks[0].task_id)?.project_id;\n    if (taskProjectId) projectId = taskProjectId;\n  }\n\n  return {\n    json: {\n      project_id: projectId,\n      diagnostic_type: d.diagnostic_type,\n      severity: d.severity,\n      title: d.title,\n      description: d.description,\n      evidence: d.evidence,\n      recommendations: d.recommendations,\n      affected_tasks: d.affected_tasks,\n      affected_members: d.affected_members,\n      ai_raw_response: aiRawResponse,\n      metadata: {\n        source: 'n8n_flow7',\n        parse_success: data.parse_success,\n        analyzed_at: new Date().toISOString()\n      }\n    }\n  };\n});\n\nreturn items;"
+        "jsCode": "// ===== NODE 11: Split diagnostics thành individual items =====\n// Mỗi diagnostic cần được gửi riêng lẻ đến API\nconst data = $input.first().json;\nconst diagnostics = data.diagnostics;\nconst aiRawResponse = data.ai_raw_response;\nconst analysis = $('Code - Analyze Bottlenecks').first().json.all_analysis;\n\n// Project-level reports inherit scope from detected tasks; team reports remain unscoped.\n\nconst items = diagnostics.map(d => {\n  const scopedTasks = d.diagnostic_type === 'STUCK_TASKS' ? analysis.stuck_tasks :\n    d.diagnostic_type === 'OVERDUE_DEADLINE' ? analysis.overdue_tasks : [];\n  const projectIds = [...new Set(scopedTasks.map(task => task.project_id).filter(Boolean))];\n  const projectId = projectIds.length === 1 ? projectIds[0] : null;\n\n  return {\n    json: {\n      project_id: projectId,\n      diagnostic_type: d.diagnostic_type,\n      severity: d.severity,\n      title: d.title,\n      description: d.description,\n      evidence: d.evidence,\n      recommendations: d.recommendations,\n      affected_tasks: d.affected_tasks,\n      affected_members: d.affected_members,\n      ai_raw_response: aiRawResponse,\n      metadata: {\n        source: 'n8n_flow7',\n        parse_success: data.parse_success,\n        analyzed_at: new Date().toISOString()\n      }\n    }\n  };\n});\n\nreturn items;"
       },
       "id": "f7-node-011",
       "name": "Code - Split Diagnostics",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2400, 100]
+      "position": [
+        2400,
+        100
+      ]
     },
     {
       "parameters": {
@@ -279,7 +314,10 @@
       "name": "Switch - Severity Router",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
-      "position": [2640, 100]
+      "position": [
+        2640,
+        100
+      ]
     },
     {
       "parameters": {
@@ -296,7 +334,11 @@
       "name": "HTTP - Save Critical Diagnostic",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2920, -60]
+      "position": [
+        2920,
+        -60
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -313,7 +355,11 @@
       "name": "HTTP - Save High Diagnostic",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2920, 100]
+      "position": [
+        2920,
+        100
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -330,7 +376,11 @@
       "name": "HTTP - Save Medium Diagnostic",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2920, 260]
+      "position": [
+        2920,
+        260
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -347,7 +397,11 @@
       "name": "HTTP - Save Low Diagnostic",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2920, 420]
+      "position": [
+        2920,
+        420
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -358,7 +412,10 @@
       "name": "Merge - All Saved Results",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.1,
-      "position": [3200, 180]
+      "position": [
+        3200,
+        180
+      ]
     },
     {
       "parameters": {
@@ -368,7 +425,10 @@
       "name": "Code - Build Final Summary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3440, 180]
+      "position": [
+        3440,
+        180
+      ]
     },
     {
       "parameters": {
@@ -378,7 +438,10 @@
       "name": "Code - No Issues Found",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1420, 400]
+      "position": [
+        1420,
+        400
+      ]
     },
     {
       "parameters": {
@@ -388,7 +451,10 @@
       "name": "Code - No Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [940, 560]
+      "position": [
+        940,
+        560
+      ]
     },
     {
       "parameters": {
@@ -398,15 +464,10 @@
       "name": "Code - No Valid AI Output",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2400, 340]
-    },
-    {
-      "parameters": {},
-      "id": "f7-node-err-trigger",
-      "name": "Error Trigger",
-      "type": "n8n-nodes-base.errorTrigger",
-      "typeVersion": 1,
-      "position": [200, 740]
+      "position": [
+        2400,
+        340
+      ]
     },
     {
       "parameters": {
@@ -416,7 +477,10 @@
       "name": "Code - Handle Error",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [460, 740]
+      "position": [
+        460,
+        740
+      ]
     }
   ],
   "connections": {
@@ -447,6 +511,13 @@
         [
           {
             "node": "IF - Has Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Handle Error",
             "type": "main",
             "index": 0
           }
@@ -516,6 +587,13 @@
         [
           {
             "node": "Code - Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Handle Error",
             "type": "main",
             "index": 0
           }
@@ -602,6 +680,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Code - Handle Error",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -610,6 +695,13 @@
         [
           {
             "node": "Merge - All Saved Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Handle Error",
             "type": "main",
             "index": 0
           }
@@ -624,6 +716,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Code - Handle Error",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -632,6 +731,13 @@
         [
           {
             "node": "Merge - All Saved Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Handle Error",
             "type": "main",
             "index": 0
           }
@@ -648,17 +754,6 @@
           }
         ]
       ]
-    },
-    "Error Trigger": {
-      "main": [
-        [
-          {
-            "node": "Code - Handle Error",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
     }
   },
   "pinData": {},
@@ -670,4 +765,3 @@
   "triggerCount": 0,
   "versionId": "1"
 }
-

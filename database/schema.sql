@@ -143,7 +143,7 @@ ON CONFLICT (id) DO NOTHING;
 -- 7. BẢNG CHẨN ĐOÁN BOTTLENECK (BOTTLENECK_DIAGNOSTICS)
 CREATE TABLE IF NOT EXISTS bottleneck_diagnostics (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    project_id      UUID REFERENCES projects(id) ON DELETE CASCADE,
     diagnostic_type VARCHAR(50) NOT NULL,       -- 'STUCK_TASKS', 'OVERDUE_DEADLINE', 'MEMBER_OVERLOAD', 'WORKLOAD_IMBALANCE', 'GENERAL'
     severity        VARCHAR(20) NOT NULL,       -- 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
     title           VARCHAR(500) NOT NULL,
