@@ -134,3 +134,33 @@ INSERT INTO tasks (id, project_id, assignee_id, title, description, story_points
   'Code Review Sprint 1', 'Review toàn bộ code của sprint đầu tiên', 2, 'MEDIUM', 'IN_REVIEW',
   '2026-09-28 23:59:59+07')
 ON CONFLICT (id) DO NOTHING;
+
+-- ============================================================
+-- Bảng bổ sung cho Luồng 7 (Member 2 - VanHuy)
+-- AI Bottleneck Diagnostic
+-- ============================================================
+
+-- 7. BẢNG CHẨN ĐOÁN BOTTLENECK (BOTTLENECK_DIAGNOSTICS)
+CREATE TABLE IF NOT EXISTS bottleneck_diagnostics (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    diagnostic_type VARCHAR(50) NOT NULL,       -- 'STUCK_TASKS', 'OVERDUE_DEADLINE', 'MEMBER_OVERLOAD', 'WORKLOAD_IMBALANCE', 'GENERAL'
+    severity        VARCHAR(20) NOT NULL,       -- 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
+    title           VARCHAR(500) NOT NULL,
+    description     TEXT NOT NULL,
+    evidence        JSONB DEFAULT '[]',
+    recommendations JSONB DEFAULT '[]',
+    affected_tasks  JSONB DEFAULT '[]',
+    affected_members JSONB DEFAULT '[]',
+    ai_raw_response TEXT,
+    is_resolved     BOOLEAN DEFAULT FALSE,
+    resolved_at     TIMESTAMPTZ,
+    metadata        JSONB DEFAULT '{}',
+    created_at      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_diagnostics_project ON bottleneck_diagnostics(project_id);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_severity ON bottleneck_diagnostics(severity);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_type ON bottleneck_diagnostics(diagnostic_type);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_resolved ON bottleneck_diagnostics(is_resolved);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_created ON bottleneck_diagnostics(created_at DESC);

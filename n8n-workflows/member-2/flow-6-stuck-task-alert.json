@@ -1,0 +1,200 @@
+{
+  "name": "Flow 6 - Stuck Task Alert",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "d2a3b4c5-0001-4000-8000-000000000001",
+      "name": "Schedule - Every 2 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  t.id AS task_id,\n  t.title AS task_title,\n  t.status,\n  t.priority,\n  t.story_points,\n  t.due_date,\n  t.project_id,\n  t.assignee_id,\n  m.full_name AS assignee_name,\n  m.email AS assignee_email,\n  p.name AS project_name,\n  t.updated_at,\n  ROUND(EXTRACT(EPOCH FROM (NOW() - t.updated_at)) / 3600, 2) AS inactive_hours,\n  (\n    SELECT tl.logged_at\n    FROM task_logs tl\n    WHERE tl.task_id = t.id\n    ORDER BY tl.logged_at DESC\n    LIMIT 1\n  ) AS last_log_at\nFROM tasks t\nLEFT JOIN members m ON t.assignee_id = m.id\nLEFT JOIN projects p ON t.project_id = p.id\nWHERE t.status NOT IN ('DONE')\n  AND t.updated_at < NOW() - INTERVAL '24 hours'\nORDER BY t.updated_at ASC;",
+        "options": {}
+      },
+      "id": "d2a3b4c5-0001-4000-8000-000000000002",
+      "name": "Postgres - Find Stuck Tasks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-stuck-exists",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d2a3b4c5-0001-4000-8000-000000000003",
+      "name": "IF - Has Stuck Tasks",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Phan tich va phan loai muc do nghiem trong cua cac task bi stuck\nconst stuckTasks = $input.all().map(item => {\n  const d = item.json;\n  const inactiveHours = parseFloat(d.inactive_hours) || 0;\n  \n  // Phan loai muc do nghiem trong\n  let severity = 'MEDIUM';\n  if (inactiveHours >= 72 || d.priority === 'URGENT') {\n    severity = 'CRITICAL';\n  } else if (inactiveHours >= 48 || d.priority === 'HIGH') {\n    severity = 'HIGH';\n  }\n  \n  // Kiem tra co qua han (overdue) khong\n  const isOverdue = d.due_date ? new Date(d.due_date) < new Date() : false;\n  if (isOverdue) {\n    severity = 'CRITICAL';\n  }\n\n  return {\n    task_id: d.task_id,\n    task_title: d.task_title,\n    status: d.status,\n    priority: d.priority,\n    story_points: d.story_points,\n    project_id: d.project_id,\n    project_name: d.project_name,\n    assignee_id: d.assignee_id,\n    assignee_name: d.assignee_name || 'Chua gan',\n    assignee_email: d.assignee_email,\n    inactive_hours: inactiveHours,\n    due_date: d.due_date,\n    is_overdue: isOverdue,\n    severity: severity,\n    alert_message: `[${severity}] Task \"${d.task_title}\" bi stuck o trang thai ${d.status} da ${Math.round(inactiveHours)} gio` + (isOverdue ? ' (DA QUA HAN!)' : '')\n  };\n});\n\n// Sap xep theo muc do: CRITICAL > HIGH > MEDIUM\nconst severityOrder = { 'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2 };\nstuckTasks.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);\n\n// Thong ke tong hop\nconst summary = {\n  total_stuck: stuckTasks.length,\n  critical_count: stuckTasks.filter(t => t.severity === 'CRITICAL').length,\n  high_count: stuckTasks.filter(t => t.severity === 'HIGH').length,\n  medium_count: stuckTasks.filter(t => t.severity === 'MEDIUM').length,\n  overdue_count: stuckTasks.filter(t => t.is_overdue).length,\n  scanned_at: new Date().toISOString()\n};\n\nreturn [{\n  json: {\n    summary: summary,\n    stuck_tasks: stuckTasks\n  }\n}];"
+      },
+      "id": "d2a3b4c5-0001-4000-8000-000000000004",
+      "name": "Code - Analyze Stuck Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tasks SET is_bottleneck = TRUE, updated_at = updated_at WHERE id IN (\n{{ $json.stuck_tasks.map(t => \"'\" + t.task_id + \"'\").join(',\\n') }}\n) AND is_bottleneck = FALSE\nRETURNING id, title, is_bottleneck;",
+        "options": {}
+      },
+      "id": "d2a3b4c5-0001-4000-8000-000000000005",
+      "name": "Postgres - Flag Bottleneck",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO activity_history (task_id, member_id, action_type, old_value, new_value, metadata)\nSELECT\n  t.id,\n  t.assignee_id,\n  'STUCK_ALERT',\n  t.status,\n  t.status,\n  jsonb_build_object(\n    'source', 'n8n_flow6',\n    'severity', CASE\n      WHEN t.priority = 'URGENT' OR t.updated_at < NOW() - INTERVAL '72 hours' OR (t.due_date IS NOT NULL AND t.due_date < NOW()) THEN 'CRITICAL'\n      WHEN t.priority = 'HIGH' OR t.updated_at < NOW() - INTERVAL '48 hours' THEN 'HIGH'\n      ELSE 'MEDIUM'\n    END,\n    'inactive_hours', ROUND(EXTRACT(EPOCH FROM (NOW() - t.updated_at)) / 3600, 2),\n    'scanned_at', NOW()\n  )\nFROM tasks t\nWHERE t.status NOT IN ('DONE')\n  AND t.updated_at < NOW() - INTERVAL '24 hours'\n  AND NOT EXISTS (\n    SELECT 1 FROM activity_history ah\n    WHERE ah.task_id = t.id\n      AND ah.action_type = 'STUCK_ALERT'\n      AND ah.created_at > NOW() - INTERVAL '6 hours'\n  )\nRETURNING *;",
+        "options": {}
+      },
+      "id": "d2a3b4c5-0001-4000-8000-000000000006",
+      "name": "Postgres - Log Stuck Alert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Tong hop ket qua cuoi cung\nconst analysisData = $('Code - Analyze Stuck Tasks').first().json;\nconst flaggedRows = $('Postgres - Flag Bottleneck').all();\nconst alertRows = $input.all();\n\nreturn [{\n  json: {\n    success: true,\n    flow: 'flow6-stuck-task-alert',\n    summary: analysisData.summary,\n    newly_flagged_bottlenecks: flaggedRows.length,\n    new_alerts_logged: alertRows.length,\n    stuck_tasks: analysisData.stuck_tasks,\n    processed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "d2a3b4c5-0001-4000-8000-000000000007",
+      "name": "Code - Build Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1750, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Khong co task nao bi stuck - ket qua sach\nreturn [{\n  json: {\n    success: true,\n    flow: 'flow6-stuck-task-alert',\n    message: 'Khong co task nao bi stuck! Tat ca dang hoat dong binh thuong.',\n    total_stuck: 0,\n    scanned_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "d2a3b4c5-0001-4000-8000-000000000008",
+      "name": "Code - No Stuck Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 500]
+    }
+  ],
+  "connections": {
+    "Schedule - Every 2 Hours": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Find Stuck Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Find Stuck Tasks": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Stuck Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Stuck Tasks": {
+      "main": [
+        [
+          {
+            "node": "Code - Analyze Stuck Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - No Stuck Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Analyze Stuck Tasks": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Flag Bottleneck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Flag Bottleneck": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Log Stuck Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Log Stuck Alert": {
+      "main": [
+        [
+          {
+            "node": "Code - Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "versionId": "1"
+}
