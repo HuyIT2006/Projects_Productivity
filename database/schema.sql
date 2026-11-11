@@ -164,3 +164,40 @@ CREATE INDEX IF NOT EXISTS idx_diagnostics_severity ON bottleneck_diagnostics(se
 CREATE INDEX IF NOT EXISTS idx_diagnostics_type ON bottleneck_diagnostics(diagnostic_type);
 CREATE INDEX IF NOT EXISTS idx_diagnostics_resolved ON bottleneck_diagnostics(is_resolved);
 CREATE INDEX IF NOT EXISTS idx_diagnostics_created ON bottleneck_diagnostics(created_at DESC);
+
+-- ============================================================
+-- Bảng bổ sung cho Luồng 8 (Member 2 - VanHuy)
+-- Member Productivity Scoring (Cron)
+-- ============================================================
+
+-- 8. BẢNG ĐIỂM NĂNG SUẤT THÀNH VIÊN (PRODUCTIVITY_SCORES)
+CREATE TABLE IF NOT EXISTS productivity_scores (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    member_id       UUID NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+    period_start    TIMESTAMPTZ NOT NULL,
+    period_end      TIMESTAMPTZ NOT NULL,
+    tasks_completed     INT DEFAULT 0,
+    tasks_overdue       INT DEFAULT 0,
+    tasks_on_time       INT DEFAULT 0,
+    total_story_points  INT DEFAULT 0,
+    avg_lead_time_hours NUMERIC(10,2),
+    stuck_task_count    INT DEFAULT 0,
+    bottleneck_count    INT DEFAULT 0,
+    active_task_count   INT DEFAULT 0,
+    completion_score    NUMERIC(5,2) DEFAULT 0,
+    timeliness_score    NUMERIC(5,2) DEFAULT 0,
+    velocity_score      NUMERIC(5,2) DEFAULT 0,
+    quality_score       NUMERIC(5,2) DEFAULT 0,
+    final_score         NUMERIC(5,2) DEFAULT 0,
+    score_grade         VARCHAR(10),
+    score_trend         VARCHAR(20),
+    ai_summary          TEXT,
+    ai_raw_response     TEXT,
+    metadata            JSONB DEFAULT '{}',
+    created_at          TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_prod_scores_member ON productivity_scores(member_id);
+CREATE INDEX IF NOT EXISTS idx_prod_scores_period ON productivity_scores(period_end DESC);
+CREATE INDEX IF NOT EXISTS idx_prod_scores_grade ON productivity_scores(score_grade);
+CREATE INDEX IF NOT EXISTS idx_prod_scores_created ON productivity_scores(created_at DESC);

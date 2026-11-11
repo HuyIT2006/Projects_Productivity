@@ -1,0 +1,557 @@
+{
+  "name": "Flow 8 - Member Productivity Scoring (Cron)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "f8-node-001",
+      "name": "Schedule - Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {},
+      "id": "f8-node-002",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 500]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:3000/api/productivity-scores/collect?period_days=7",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "f8-node-003",
+      "name": "HTTP - Collect Member Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-has-members",
+              "leftValue": "={{ $json.members ? $json.members.length : 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f8-node-004",
+      "name": "IF - Has Members",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [700, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== NODE 5: Tính điểm năng suất cho từng thành viên =====\nconst data = $input.first().json;\nconst members = data.members || [];\nconst teamAvg = data.team_averages || {};\nconst period = data.period || {};\n\nconst scoredMembers = members.map(member => {\n  const m = member.metrics;\n\n  // === 1. COMPLETION SCORE (0-100) ===\n  // Dựa trên số task hoàn thành, so sánh với team average\n  let completionScore = 0;\n  if (m.tasks_completed > 0) {\n    const completionRatio = teamAvg.avg_completed > 0\n      ? m.tasks_completed / teamAvg.avg_completed\n      : 1;\n    completionScore = Math.min(100, Math.round(completionRatio * 60 + 20));\n  }\n  // Bonus nếu hoàn thành nhiều hơn trung bình\n  if (m.tasks_completed > teamAvg.avg_completed && teamAvg.avg_completed > 0) {\n    completionScore = Math.min(100, completionScore + 10);\n  }\n\n  // === 2. TIMELINESS SCORE (0-100) ===\n  // Dựa trên tỷ lệ task đúng hạn vs quá hạn\n  let timelinessScore = 80; // default nếu chưa có task\n  const totalWithDeadline = m.tasks_on_time + m.tasks_overdue;\n  if (totalWithDeadline > 0) {\n    const onTimeRate = m.tasks_on_time / totalWithDeadline;\n    timelinessScore = Math.round(onTimeRate * 100);\n  } else if (m.tasks_completed > 0) {\n    timelinessScore = 70; // completed nhưng không có deadline\n  }\n\n  // === 3. VELOCITY SCORE (0-100) ===\n  // Dựa trên story points hoàn thành, so sánh với team\n  let velocityScore = 0;\n  if (m.total_story_points > 0) {\n    const velocityRatio = teamAvg.avg_story_points > 0\n      ? m.total_story_points / teamAvg.avg_story_points\n      : 1;\n    velocityScore = Math.min(100, Math.round(velocityRatio * 60 + 20));\n  }\n  // Bonus cho lead time nhanh\n  if (m.avg_lead_time_hours !== null && m.avg_lead_time_hours < 48) {\n    velocityScore = Math.min(100, velocityScore + 10);\n  }\n\n  // === 4. QUALITY SCORE (0-100) ===\n  // Dựa trên stuck tasks, bottleneck (ít hơn = tốt hơn)\n  let qualityScore = 100;\n  // Trừ điểm cho stuck tasks\n  qualityScore -= m.stuck_task_count * 15;\n  // Trừ điểm cho bottleneck\n  qualityScore -= m.bottleneck_count * 20;\n  // Trừ điểm cho task quá hạn\n  qualityScore -= m.tasks_overdue * 10;\n  qualityScore = Math.max(0, Math.min(100, qualityScore));\n\n  // === FINAL SCORE (0-200, tương thích members.productivity_score) ===\n  // Trọng số: completion=30%, timeliness=25%, velocity=25%, quality=20%\n  const weightedScore = (\n    completionScore * 0.30 +\n    timelinessScore * 0.25 +\n    velocityScore * 0.25 +\n    qualityScore * 0.20\n  );\n  // Scale lên 0-200\n  const finalScore = Math.round(weightedScore * 2 * 100) / 100;\n\n  // === GRADE ===\n  let grade = 'C';\n  if (finalScore >= 180) grade = 'A+';\n  else if (finalScore >= 160) grade = 'A';\n  else if (finalScore >= 140) grade = 'B+';\n  else if (finalScore >= 120) grade = 'B';\n  else if (finalScore >= 100) grade = 'C+';\n  else if (finalScore >= 80) grade = 'C';\n  else if (finalScore >= 60) grade = 'D';\n  else grade = 'F';\n\n  // === TREND ===\n  let trend = 'STABLE';\n  if (member.previous_score) {\n    const diff = finalScore - member.previous_score.final_score;\n    if (diff >= 10) trend = 'IMPROVING';\n    else if (diff <= -10) trend = 'DECLINING';\n  }\n\n  return {\n    member_id: member.member_id,\n    full_name: member.full_name,\n    email: member.email,\n    current_db_score: member.current_score,\n    period_start: period.start,\n    period_end: period.end,\n    // Metrics thô\n    tasks_completed: m.tasks_completed,\n    tasks_overdue: m.tasks_overdue,\n    tasks_on_time: m.tasks_on_time,\n    total_story_points: m.total_story_points,\n    avg_lead_time_hours: m.avg_lead_time_hours,\n    stuck_task_count: m.stuck_task_count,\n    bottleneck_count: m.bottleneck_count,\n    active_task_count: m.active_task_count,\n    activity_count: m.activity_count,\n    // Điểm thành phần\n    completion_score: completionScore,\n    timeliness_score: timelinessScore,\n    velocity_score: velocityScore,\n    quality_score: qualityScore,\n    // Kết quả\n    final_score: finalScore,\n    score_grade: grade,\n    score_trend: trend,\n    previous_score: member.previous_score\n  };\n});\n\n// Sắp xếp theo điểm giảm dần\nscoredMembers.sort((a, b) => b.final_score - a.final_score);\n\nreturn [{\n  json: {\n    total_members: scoredMembers.length,\n    period: period,\n    team_averages: teamAvg,\n    scored_members: scoredMembers\n  }\n}];"
+      },
+      "id": "f8-node-005",
+      "name": "Code - Calculate Scores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== NODE 6: Chuẩn bị prompt cho AI phân tích =====\nconst data = $input.first().json;\nconst members = data.scored_members;\nconst period = data.period;\nconst teamAvg = data.team_averages;\n\nlet context = '=== BÁO CÁO NĂNG SUẤT THÀNH VIÊN ===\\n';\ncontext += `Kỳ đánh giá: ${period.start} đến ${period.end} (${period.days} ngày)\\n`;\ncontext += `Team trung bình: ${teamAvg.avg_completed} tasks hoàn thành, ${teamAvg.avg_story_points} story points\\n\\n`;\n\nmembers.forEach((m, i) => {\n  context += `--- ${i+1}. ${m.full_name} (${m.email}) ---\\n`;\n  context += `  Điểm tổng: ${m.final_score}/200 (${m.score_grade}) | Trend: ${m.score_trend}\\n`;\n  context += `  Tasks hoàn thành: ${m.tasks_completed} | Đúng hạn: ${m.tasks_on_time} | Quá hạn: ${m.tasks_overdue}\\n`;\n  context += `  Story points: ${m.total_story_points} | Lead time TB: ${m.avg_lead_time_hours || 'N/A'} giờ\\n`;\n  context += `  Stuck tasks: ${m.stuck_task_count} | Bottleneck: ${m.bottleneck_count} | Active: ${m.active_task_count}\\n`;\n  context += `  Điểm thành phần: Completion=${m.completion_score}, Timeliness=${m.timeliness_score}, `;\n  context += `Velocity=${m.velocity_score}, Quality=${m.quality_score}\\n`;\n  if (m.previous_score) {\n    context += `  Kỳ trước: ${m.previous_score.final_score} (${m.previous_score.score_grade})\\n`;\n  }\n  context += '\\n';\n});\n\nconst prompt = `Bạn là AI chuyên gia đánh giá năng suất đội ngũ phát triển phần mềm.\n\nDựa trên dữ liệu thực tế sau, hãy viết nhận xét ngắn gọn cho TỪNG thành viên.\n\n${context}\n\nHãy trả về JSON array, mỗi phần tử cho 1 thành viên, theo format SAU (KHÔNG thêm markdown, KHÔNG thêm text ngoài JSON):\n\n[\n  {\n    \"member_id\": \"uuid\",\n    \"summary\": \"Nhận xét tổng quan 2-3 câu về hiệu suất, điểm mạnh, điểm cần cải thiện (tiếng Việt)\",\n    \"strengths\": [\"Điểm mạnh 1\", \"Điểm mạnh 2\"],\n    \"improvements\": [\"Cần cải thiện 1\", \"Cần cải thiện 2\"],\n    \"recommendation\": \"Đề xuất hành động cụ thể tiếp theo\"\n  }\n]\n\nLưu ý:\n- Mỗi member phải có 1 entry\n- summary phải dựa trên dữ liệu thực tế, không chung chung\n- Trả về JSON array THUẦN TÚY, không có markdown code block`;\n\nreturn [{\n  json: {\n    prompt: prompt,\n    scored_members: members,\n    period: period,\n    team_averages: teamAvg\n  }\n}];"
+      },
+      "id": "f8-node-006",
+      "name": "Code - Build AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'google/gemini-2.0-flash-001', messages: [ { role: 'system', content: 'Bạn là AI đánh giá năng suất thành viên. Luôn trả về JSON array thuần túy, không markdown.' }, { role: 'user', content: $json.prompt } ], temperature: 0.3, max_tokens: 3000 }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "f8-node-007",
+      "name": "HTTP - AI Analysis (OpenRouter)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1420, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "OpenRouter API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== NODE 8: Parse AI response và merge với scored data =====\nconst aiResponse = $input.first().json;\nconst scoredData = $('Code - Calculate Scores').first().json;\nconst scoredMembers = scoredData.scored_members;\nconst period = scoredData.period;\n\ntry {\n  // Lấy content từ AI response\n  let aiContent = '';\n  if (aiResponse.choices && aiResponse.choices.length > 0) {\n    aiContent = aiResponse.choices[0].message?.content || '';\n  } else if (aiResponse.message?.content) {\n    aiContent = aiResponse.message.content;\n  }\n\n  let cleanContent = aiContent.trim();\n  // Clean markdown code blocks\n  if (cleanContent.startsWith('```json')) {\n    cleanContent = cleanContent.replace(/^```json\\s*/, '').replace(/```\\s*$/, '');\n  } else if (cleanContent.startsWith('```')) {\n    cleanContent = cleanContent.replace(/^```\\s*/, '').replace(/```\\s*$/, '');\n  }\n  cleanContent = cleanContent.trim();\n\n  let aiAnalysis = JSON.parse(cleanContent);\n  if (!Array.isArray(aiAnalysis)) {\n    aiAnalysis = aiAnalysis.members || aiAnalysis.results || [aiAnalysis];\n  }\n\n  // Merge AI summary vào scored members\n  const mergedMembers = scoredMembers.map(member => {\n    const aiEntry = aiAnalysis.find(a => a.member_id === member.member_id);\n    return {\n      ...member,\n      ai_summary: aiEntry\n        ? aiEntry.summary + '\\n\\nĐiểm mạnh: ' + (aiEntry.strengths || []).join(', ') +\n          '\\nCần cải thiện: ' + (aiEntry.improvements || []).join(', ') +\n          '\\nĐề xuất: ' + (aiEntry.recommendation || 'N/A')\n        : `${member.full_name} đạt ${member.final_score}/200 điểm (${member.score_grade}). Trend: ${member.score_trend}.`,\n      ai_raw_response: aiContent,\n      parse_success: true\n    };\n  });\n\n  return [{\n    json: {\n      parse_success: true,\n      merged_members: mergedMembers,\n      period: period\n    }\n  }];\n\n} catch (error) {\n  // Fallback: không có AI summary\n  const fallbackMembers = scoredMembers.map(member => ({\n    ...member,\n    ai_summary: `${member.full_name}: Điểm ${member.final_score}/200 (${member.score_grade}). ` +\n      `Hoàn thành ${member.tasks_completed} tasks, ${member.tasks_on_time} đúng hạn, ${member.tasks_overdue} trễ. ` +\n      `Trend: ${member.score_trend}.`,\n    ai_raw_response: 'FALLBACK - AI parse failed: ' + error.message,\n    parse_success: false\n  }));\n\n  return [{\n    json: {\n      parse_success: false,\n      parse_error: error.message,\n      merged_members: fallbackMembers,\n      period: period\n    }\n  }];\n}"
+      },
+      "id": "f8-node-008",
+      "name": "Code - Parse AI & Merge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1660, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-has-merged",
+              "leftValue": "={{ $json.merged_members ? $json.merged_members.length : 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f8-node-009",
+      "name": "IF - Has Scored Members",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== NODE 10: Split members thành individual items =====\nconst data = $input.first().json;\nconst members = data.merged_members;\nconst period = data.period;\n\nconst items = members.map(m => ({\n  json: {\n    member_id: m.member_id,\n    period_start: m.period_start || period.start,\n    period_end: m.period_end || period.end,\n    tasks_completed: m.tasks_completed,\n    tasks_overdue: m.tasks_overdue,\n    tasks_on_time: m.tasks_on_time,\n    total_story_points: m.total_story_points,\n    avg_lead_time_hours: m.avg_lead_time_hours,\n    stuck_task_count: m.stuck_task_count,\n    bottleneck_count: m.bottleneck_count,\n    active_task_count: m.active_task_count,\n    completion_score: m.completion_score,\n    timeliness_score: m.timeliness_score,\n    velocity_score: m.velocity_score,\n    quality_score: m.quality_score,\n    final_score: m.final_score,\n    score_grade: m.score_grade,\n    score_trend: m.score_trend,\n    ai_summary: m.ai_summary,\n    ai_raw_response: m.ai_raw_response,\n    metadata: {\n      source: 'n8n_flow8',\n      parse_success: m.parse_success,\n      full_name: m.full_name,\n      email: m.email,\n      scored_at: new Date().toISOString()\n    }\n  }\n}));\n\nreturn items;"
+      },
+      "id": "f8-node-010",
+      "name": "Code - Split Members",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2140, 200]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "switch-declining",
+                    "leftValue": "={{ $json.score_trend }}",
+                    "rightValue": "DECLINING",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": "DECLINING"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "switch-improving",
+                    "leftValue": "={{ $json.score_trend }}",
+                    "rightValue": "IMPROVING",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": "IMPROVING"
+            }
+          ],
+          "fallbackOutput": {
+            "name": "STABLE"
+          }
+        },
+        "options": {}
+      },
+      "id": "f8-node-011",
+      "name": "Switch - Score Trend",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [2380, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3000/api/productivity-scores",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(Object.assign({}, $json, { metadata: Object.assign({}, $json.metadata, { trend_route: 'DECLINING', needs_attention: true }) })) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "f8-node-012",
+      "name": "HTTP - Save Declining Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3000/api/productivity-scores",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(Object.assign({}, $json, { metadata: Object.assign({}, $json.metadata, { trend_route: 'IMPROVING' }) })) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "f8-node-013",
+      "name": "HTTP - Save Improving Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3000/api/productivity-scores",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(Object.assign({}, $json, { metadata: Object.assign({}, $json.metadata, { trend_route: 'STABLE' }) })) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "f8-node-014",
+      "name": "HTTP - Save Stable Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 380]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "f8-node-015",
+      "name": "Merge - All Saved Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [2920, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== NODE 16: Tổng hợp kết quả cuối cùng =====\nconst savedResults = $input.all();\nconst scoreData = $('Code - Calculate Scores').first().json;\nconst parseData = $('Code - Parse AI & Merge').first().json;\n\nconst successCount = savedResults.filter(r => r.json.id || r.json.member_id).length;\nconst errorCount = savedResults.filter(r => r.json.error).length;\n\n// Phân loại kết quả\nconst gradeCounts = {};\nconst trendCounts = { IMPROVING: 0, STABLE: 0, DECLINING: 0 };\n\nsavedResults.forEach(r => {\n  const grade = r.json.score_grade;\n  if (grade) gradeCounts[grade] = (gradeCounts[grade] || 0) + 1;\n  const trend = r.json.score_trend;\n  if (trend && trendCounts.hasOwnProperty(trend)) trendCounts[trend]++;\n});\n\nreturn [{\n  json: {\n    success: true,\n    flow: 'flow8-member-productivity-scoring',\n    summary: {\n      total_members_scored: successCount,\n      save_errors: errorCount,\n      ai_parse_success: parseData.parse_success,\n      grade_distribution: gradeCounts,\n      trend_distribution: trendCounts,\n      period: scoreData.period,\n      team_averages: scoreData.team_averages\n    },\n    scored_members: savedResults.map(r => ({\n      member_id: r.json.member_id,\n      full_name: r.json.metadata?.full_name,\n      final_score: r.json.final_score,\n      score_grade: r.json.score_grade,\n      score_trend: r.json.score_trend\n    })),\n    processed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "f8-node-016",
+      "name": "Code - Build Final Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3160, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== No Members Found =====\nreturn [{\n  json: {\n    success: true,\n    flow: 'flow8-member-productivity-scoring',\n    message: 'Không có thành viên nào để chấm điểm. Database có thể trống.',\n    total_members: 0,\n    scanned_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "f8-node-017",
+      "name": "Code - No Members",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== No Valid Scored Members =====\nreturn [{\n  json: {\n    success: false,\n    flow: 'flow8-member-productivity-scoring',\n    message: 'Không có dữ liệu chấm điểm hợp lệ sau khi xử lý AI.',\n    scanned_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "f8-node-018",
+      "name": "Code - No Valid Scores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2140, 440]
+    },
+    {
+      "parameters": {},
+      "id": "f8-node-err-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [200, 740]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Global Error Handler =====\nconst errorData = $input.first().json;\n\nconst errorMessage = errorData.execution?.error?.message ||\n                     errorData.error?.message ||\n                     'Unknown error in Flow 8';\nconst errorNode = errorData.execution?.lastNodeExecuted || 'unknown';\n\nconsole.error(`[Flow 8 Error] Node: ${errorNode}, Error: ${errorMessage}`);\n\nreturn [{\n  json: {\n    success: false,\n    flow: 'flow8-member-productivity-scoring',\n    error: {\n      message: errorMessage,\n      node: errorNode,\n      timestamp: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "id": "f8-node-err-handler",
+      "name": "Code - Handle Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 740]
+    }
+  ],
+  "connections": {
+    "Schedule - Every 6 Hours": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Collect Member Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Collect Member Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Collect Member Data": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Members",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Members": {
+      "main": [
+        [
+          {
+            "node": "Code - Calculate Scores",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - No Members",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Calculate Scores": {
+      "main": [
+        [
+          {
+            "node": "Code - Build AI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Build AI Prompt": {
+      "main": [
+        [
+          {
+            "node": "HTTP - AI Analysis (OpenRouter)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - AI Analysis (OpenRouter)": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse AI & Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse AI & Merge": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Scored Members",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Scored Members": {
+      "main": [
+        [
+          {
+            "node": "Code - Split Members",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - No Valid Scores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Split Members": {
+      "main": [
+        [
+          {
+            "node": "Switch - Score Trend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch - Score Trend": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Save Declining Score",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP - Save Improving Score",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP - Save Stable Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Save Declining Score": {
+      "main": [
+        [
+          {
+            "node": "Merge - All Saved Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Save Improving Score": {
+      "main": [
+        [
+          {
+            "node": "Merge - All Saved Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Save Stable Score": {
+      "main": [
+        [
+          {
+            "node": "Merge - All Saved Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge - All Saved Results": {
+      "main": [
+        [
+          {
+            "node": "Code - Build Final Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code - Handle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "versionId": "1"
+}
+
