@@ -16,7 +16,10 @@
       "name": "Schedule - Every 6 Hours",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [200, 300]
+      "position": [
+        200,
+        300
+      ]
     },
     {
       "parameters": {},
@@ -24,7 +27,10 @@
       "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [200, 500]
+      "position": [
+        200,
+        500
+      ]
     },
     {
       "parameters": {
@@ -38,7 +44,10 @@
       "name": "HTTP - Collect Member Data",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 400]
+      "position": [
+        460,
+        400
+      ]
     },
     {
       "parameters": {
@@ -68,7 +77,10 @@
       "name": "IF - Has Members",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [700, 400]
+      "position": [
+        920,
+        400
+      ]
     },
     {
       "parameters": {
@@ -78,7 +90,10 @@
       "name": "Code - Calculate Scores",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [940, 300]
+      "position": [
+        940,
+        300
+      ]
     },
     {
       "parameters": {
@@ -88,42 +103,50 @@
       "name": "Code - Build AI Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1180, 300]
+      "position": [
+        1180,
+        300
+      ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://openrouter.ai/api/v1/chat/completions",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ $env.GEMINI_API_KEY || \"AIzaSy_YOUR_GEMINI_KEY\" }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: 'google/gemini-2.0-flash-001', messages: [ { role: 'system', content: 'Bạn là AI đánh giá năng suất thành viên. Luôn trả về JSON array thuần túy, không markdown.' }, { role: 'user', content: $json.prompt } ], temperature: 0.3, max_tokens: 3000 }) }}",
+        "jsonBody": "={{ JSON.stringify({\n  contents: [\n    {\n      parts: [\n        { text: $json.prompt }\n      ]\n    }\n  ],\n  generationConfig: {\n    temperature: 0.3,\n    responseMimeType: \"application/json\"\n  }\n}) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
         }
       },
       "id": "f8-node-007",
-      "name": "HTTP - AI Analysis (OpenRouter)",
+      "name": "HTTP - AI Analysis (Gemini)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1420, 300],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
-          "name": "OpenRouter API Key"
-        }
-      }
+      "position": [
+        1420,
+        300
+      ],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "// ===== NODE 8: Parse AI response và merge với scored data =====\nconst aiResponse = $input.first().json;\nconst scoredData = $('Code - Calculate Scores').first().json;\nconst scoredMembers = scoredData.scored_members;\nconst period = scoredData.period;\n\ntry {\n  // Lấy content từ AI response\n  let aiContent = '';\n  if (aiResponse.choices && aiResponse.choices.length > 0) {\n    aiContent = aiResponse.choices[0].message?.content || '';\n  } else if (aiResponse.message?.content) {\n    aiContent = aiResponse.message.content;\n  }\n\n  let cleanContent = aiContent.trim();\n  // Clean markdown code blocks\n  if (cleanContent.startsWith('```json')) {\n    cleanContent = cleanContent.replace(/^```json\\s*/, '').replace(/```\\s*$/, '');\n  } else if (cleanContent.startsWith('```')) {\n    cleanContent = cleanContent.replace(/^```\\s*/, '').replace(/```\\s*$/, '');\n  }\n  cleanContent = cleanContent.trim();\n\n  let aiAnalysis = JSON.parse(cleanContent);\n  if (!Array.isArray(aiAnalysis)) {\n    aiAnalysis = aiAnalysis.members || aiAnalysis.results || [aiAnalysis];\n  }\n\n  // Merge AI summary vào scored members\n  const mergedMembers = scoredMembers.map(member => {\n    const aiEntry = aiAnalysis.find(a => a.member_id === member.member_id);\n    return {\n      ...member,\n      ai_summary: aiEntry\n        ? aiEntry.summary + '\\n\\nĐiểm mạnh: ' + (aiEntry.strengths || []).join(', ') +\n          '\\nCần cải thiện: ' + (aiEntry.improvements || []).join(', ') +\n          '\\nĐề xuất: ' + (aiEntry.recommendation || 'N/A')\n        : `${member.full_name} đạt ${member.final_score}/200 điểm (${member.score_grade}). Trend: ${member.score_trend}.`,\n      ai_raw_response: aiContent,\n      parse_success: true\n    };\n  });\n\n  return [{\n    json: {\n      parse_success: true,\n      merged_members: mergedMembers,\n      period: period\n    }\n  }];\n\n} catch (error) {\n  // Fallback: không có AI summary\n  const fallbackMembers = scoredMembers.map(member => ({\n    ...member,\n    ai_summary: `${member.full_name}: Điểm ${member.final_score}/200 (${member.score_grade}). ` +\n      `Hoàn thành ${member.tasks_completed} tasks, ${member.tasks_on_time} đúng hạn, ${member.tasks_overdue} trễ. ` +\n      `Trend: ${member.score_trend}.`,\n    ai_raw_response: 'FALLBACK - AI parse failed: ' + error.message,\n    parse_success: false\n  }));\n\n  return [{\n    json: {\n      parse_success: false,\n      parse_error: error.message,\n      merged_members: fallbackMembers,\n      period: period\n    }\n  }];\n}"
+        "mode": "chooseBranch",
+        "output": "input1"
       },
       "id": "f8-node-008",
       "name": "Code - Parse AI & Merge",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1660, 300]
+      "position": [
+        1660,
+        300
+      ]
     },
     {
       "parameters": {
@@ -153,7 +176,10 @@
       "name": "IF - Has Scored Members",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1900, 300]
+      "position": [
+        1900,
+        300
+      ]
     },
     {
       "parameters": {
@@ -163,7 +189,10 @@
       "name": "Code - Split Members",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2140, 200]
+      "position": [
+        2140,
+        200
+      ]
     },
     {
       "parameters": {
@@ -226,7 +255,10 @@
       "name": "Switch - Score Trend",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
-      "position": [2380, 200]
+      "position": [
+        2380,
+        200
+      ]
     },
     {
       "parameters": {
@@ -243,7 +275,10 @@
       "name": "HTTP - Save Declining Score",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2640, 60]
+      "position": [
+        2640,
+        60
+      ]
     },
     {
       "parameters": {
@@ -260,7 +295,10 @@
       "name": "HTTP - Save Improving Score",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2640, 220]
+      "position": [
+        2640,
+        220
+      ]
     },
     {
       "parameters": {
@@ -277,18 +315,24 @@
       "name": "HTTP - Save Stable Score",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2640, 380]
+      "position": [
+        2640,
+        380
+      ]
     },
     {
       "parameters": {
-        "mode": "append",
-        "options": {}
+        "mode": "chooseBranch",
+        "output": "input1"
       },
       "id": "f8-node-015",
-      "name": "Merge - All Saved Results",
+      "name": "Merge - Member & Score History",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.1,
-      "position": [2920, 220]
+      "position": [
+        700,
+        400
+      ]
     },
     {
       "parameters": {
@@ -298,7 +342,10 @@
       "name": "Code - Build Final Summary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3160, 220]
+      "position": [
+        3160,
+        220
+      ]
     },
     {
       "parameters": {
@@ -308,7 +355,10 @@
       "name": "Code - No Members",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [940, 560]
+      "position": [
+        940,
+        560
+      ]
     },
     {
       "parameters": {
@@ -318,7 +368,10 @@
       "name": "Code - No Valid Scores",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2140, 440]
+      "position": [
+        2140,
+        440
+      ]
     },
     {
       "parameters": {},
@@ -326,7 +379,10 @@
       "name": "Error Trigger",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
-      "position": [200, 740]
+      "position": [
+        200,
+        740
+      ]
     },
     {
       "parameters": {
@@ -336,7 +392,27 @@
       "name": "Code - Handle Error",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [460, 740]
+      "position": [
+        460,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:3000/api/productivity-scores?limit=5",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "f8-node-003-b",
+      "name": "HTTP - Check Score History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        560
+      ]
     }
   ],
   "connections": {
@@ -345,6 +421,11 @@
         [
           {
             "node": "HTTP - Collect Member Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP - Check Score History",
             "type": "main",
             "index": 0
           }
@@ -358,6 +439,11 @@
             "node": "HTTP - Collect Member Data",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "HTTP - Check Score History",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -366,7 +452,7 @@
       "main": [
         [
           {
-            "node": "IF - Has Members",
+            "node": "Merge - Member & Score History",
             "type": "main",
             "index": 0
           }
@@ -406,18 +492,7 @@
       "main": [
         [
           {
-            "node": "HTTP - AI Analysis (OpenRouter)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "HTTP - AI Analysis (OpenRouter)": {
-      "main": [
-        [
-          {
-            "node": "Code - Parse AI & Merge",
+            "node": "HTTP - AI Analysis (Gemini)",
             "type": "main",
             "index": 0
           }
@@ -493,7 +568,7 @@
       "main": [
         [
           {
-            "node": "Merge - All Saved Results",
+            "node": "Code - Build Final Summary",
             "type": "main",
             "index": 0
           }
@@ -504,7 +579,7 @@
       "main": [
         [
           {
-            "node": "Merge - All Saved Results",
+            "node": "Code - Build Final Summary",
             "type": "main",
             "index": 0
           }
@@ -512,17 +587,6 @@
       ]
     },
     "HTTP - Save Stable Score": {
-      "main": [
-        [
-          {
-            "node": "Merge - All Saved Results",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Merge - All Saved Results": {
       "main": [
         [
           {
@@ -543,6 +607,39 @@
           }
         ]
       ]
+    },
+    "HTTP - AI Analysis (Gemini)": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse AI & Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Check Score History": {
+      "main": [
+        [
+          {
+            "node": "Merge - Member & Score History",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge - Member & Score History": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Members",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "pinData": {},
@@ -554,4 +651,3 @@
   "triggerCount": 0,
   "versionId": "1"
 }
-
