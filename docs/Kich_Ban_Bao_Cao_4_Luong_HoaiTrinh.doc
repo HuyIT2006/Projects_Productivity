@@ -1,0 +1,355 @@
+<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<title>Kịch Bản Báo Cáo 4 Luồng AI - Hoài Trinh</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+  <w:View>Print</w:View>
+  <w:Zoom>100</w:Zoom>
+  <w:DoNotOptimizeForBrowser/>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 20mm 20mm 20mm;
+    mso-page-orientation: portrait;
+  }
+  body {
+    font-family: 'Times New Roman', 'Arial', sans-serif;
+    font-size: 13pt;
+    line-height: 1.45;
+    color: #1e293b;
+  }
+  h1 {
+    color: #1e40af;
+    font-size: 20pt;
+    text-align: center;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+  }
+  .header-meta {
+    text-align: center;
+    font-size: 12pt;
+    color: #475569;
+    margin-bottom: 25px;
+    border-bottom: 1px solid #cbd5e1;
+    padding-bottom: 12px;
+  }
+  h2 {
+    color: #15803d;
+    font-size: 16pt;
+    border-bottom: 2px solid #16a34a;
+    padding-bottom: 5px;
+    margin-top: 25px;
+    margin-bottom: 10px;
+  }
+  h3 {
+    color: #1d4ed8;
+    font-size: 13.5pt;
+    margin-top: 14px;
+    margin-bottom: 6px;
+  }
+  .quote-box {
+    background-color: #f0fdf4;
+    border-left: 4px solid #16a34a;
+    padding: 10px 14px;
+    margin: 10px 0;
+    font-style: italic;
+    color: #166534;
+  }
+  .code-box {
+    background-color: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 10.5pt;
+    color: #0f172a;
+    margin: 8px 0;
+    white-space: pre-wrap;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+  }
+  th, td {
+    border: 1px solid #cbd5e1;
+    padding: 7px 10px;
+    font-size: 11pt;
+  }
+  th {
+    background-color: #f1f5f9;
+    color: #0f172a;
+    font-weight: bold;
+    text-align: left;
+  }
+  .formula-box {
+    background-color: #eff6ff;
+    border-left: 4px solid #2563eb;
+    padding: 8px 12px;
+    margin: 8px 0;
+    font-weight: bold;
+    color: #1e40af;
+  }
+  ul {
+    margin-top: 4px;
+    margin-bottom: 6px;
+    padding-left: 20px;
+  }
+  li {
+    margin-bottom: 4px;
+  }
+</style>
+</head>
+<body>
+
+<h1>BÁO CÁO NỘI DUNG 4 LUỒNG TỰ ĐỘNG HÓA AI</h1>
+<div class="header-meta">
+  <b>Sinh viên thực hiện:</b> Hoài Trinh (Member 1) &nbsp;|&nbsp; 
+  <b>Phân hệ:</b> Planning & Resource Allocation<br>
+  <b>Công nghệ:</b> n8n Automation Engine + Google Gemini AI + PostgreSQL + Gmail API
+</div>
+
+<!-- ============================================================== LUỒNG 1 ============================================================== -->
+<h2>🟢 LUỒNG 1: AI Task Breakdown (17 Nodes)</h2>
+
+<div class="quote-box">
+  🗣 <b>Lời thoại mở đầu:</b><br>
+  "Thưa Thầy/Cô, Luồng 1 giải quyết bài toán tự động bóc tách yêu cầu tính năng thành các task kỹ thuật chi tiết. Dữ liệu chạy qua 5 chặng khép kín như sau:"
+</div>
+
+<h3>🔹 Chặng 1: Kiểm định & Chuẩn hóa đầu vào (Nodes 1, 2, 3, 4)</h3>
+<ul>
+  <li><b>Node Webhook:</b> Tiếp nhận dữ liệu JSON từ Frontend:
+    <div class="code-box">{
+  "project_id": "a0000001-0000-0000-0000-000000000001",
+  "feature_description": "Xây dựng hệ thống đăng nhập bằng Google OAuth2 và bảo mật JWT",
+  "notify_email": "htchannelas@gmail.com"
+}</div>
+  </li>
+  <li><b>Node Validate Input (IF):</b> Đo độ dài <code>feature_description</code> = 65 ký tự (&ge; 10 ký tự) &rarr; Hợp lệ. <i>(Nếu chuỗi rỗng hoặc &lt; 10 ký tự, lập tức rẽ sang node <b>Respond 400</b> báo lỗi và dừng luồng ngay để không lãng phí token AI)</i>.</li>
+  <li><b>Node Prepare Input (Code):</b> Chạy Regex kiểm tra UUID và Email, cắt bỏ khoảng trắng thừa <code>.trim()</code>, giới hạn độ dài an toàn tối đa 1.000 ký tự.</li>
+</ul>
+
+<h3>🔹 Chặng 2: Nạp ngữ cảnh Database & Gọi AI (Nodes 5, 6, 7)</h3>
+<ul>
+  <li><b>Node Get Project Context (Postgres):</b> Truy vấn lấy tên dự án <code>"AI Productivity System"</code>, deadline <code>"2026-12-31"</code> và danh sách các task đã có: <code>["Setup Docker & PostgreSQL", "Design Kanban Board UI"]</code>.</li>
+  <li><b>Node Build Prompt (Code):</b> Ghép ngữ cảnh trên vào câu lệnh yêu cầu AI: <i>"Không tạo trùng với task Setup Docker và Design UI... Chia tính năng Đăng nhập OAuth2 & JWT thành 3&ndash;5 task kỹ thuật dạng JSON..."</i></li>
+  <li><b>Node Gemini Breakdown (Google Gemini):</b> AI phân tích và trả về 3 task kỹ thuật:
+    <div class="code-box">[
+  {"title": "Cấu hình Google Cloud Console và OAuth2", "story_points": 2, "required_skills": ["OAuth2", "DevOps"], "priority": "HIGH"},
+  {"title": "Xây dựng API cấp phát & verify JWT Token", "story_points": 3, "required_skills": ["JWT", "Backend"], "priority": "URGENT"},
+  {"title": "Tích hợp giao diện nút Đăng nhập Google", "story_points": 3, "required_skills": ["Next.js", "Frontend"], "priority": "MEDIUM"}
+]</div>
+  </li>
+</ul>
+
+<h3>🔹 Chặng 3: Xử lý ngoại lệ & Chống trùng lặp (Nodes 8, 9, 10, 11)</h3>
+<ul>
+  <li><b>Node Parse and Validate (Code):</b> Bóc tách chuỗi JSON trả về trong khối <code>try/catch</code>.</li>
+  <li><b>Node Parse OK? (IF):</b> Kiểm tra JSON hợp lệ &rarr; Đi tiếp. <i>(Nếu AI trả lỗi cú pháp, rẽ sang node <b>Respond 502</b>)</i>.</li>
+  <li><b>Node Normalize and Dedupe (Code):</b> Đối chiếu 3 task mới với các task cũ trong Database &rarr; Trùng lặp = 0; đồng thời chuẩn hóa <code>story_points</code> (1&ndash;8) và độ ưu tiên.</li>
+</ul>
+
+<h3>🔹 Chặng 4: Lưu Database & Ghi Log kiểm toán (Nodes 12, 13, 14)</h3>
+<ul>
+  <li><b>Node Insert Tasks (Postgres):</b> Thực thi lệnh SQL chèn 3 task vào bảng <code>tasks</code> với trạng thái <code>TODO</code> và <code>assignee_id = NULL</code>.</li>
+  <li><b>Node Build Log SQL & Log Activity (Postgres):</b> Tự động ghi 3 dòng nhật ký vào bảng <code>activity_history</code> với hành động <code>TASK_CREATED</code>.</li>
+</ul>
+
+<h3>🔹 Chặng 5: Báo cáo & Phản hồi (Nodes 15, 16, 17)</h3>
+<ul>
+  <li><b>Node Build Summary & Send Gmail:</b> Tạo bảng HTML và gửi email báo cáo về <code>htchannelas@gmail.com</code> với tiêu đề:<br>
+  📧 <b>✅ [Luồng 1] AI đã tạo 3 task mới</b>.</li>
+  <li><b>Node Respond Success:</b> Phản hồi HTTP 200 kèm danh sách 3 task vừa tạo về cho màn hình người dùng.</li>
+</ul>
+
+<br>
+<!-- ============================================================== LUỒNG 2 ============================================================== -->
+<h2>🟢 LUỒNG 2: Smart Workload Balancer (15 Nodes)</h2>
+
+<div class="quote-box">
+  🗣 <b>Lời thoại mở đầu:</b><br>
+  "Thưa Thầy/Cô, sau khi 3 task được tạo ra nhưng chưa có người nhận (<code>assignee_id = NULL</code>), Luồng 2 tự động kích hoạt để cân bằng khối lượng công việc qua 4 chặng:"
+</div>
+
+<h3>🔹 Chặng 1: Thu thập & Kiểm tra task tồn đọng (Nodes 1, 2, 3, 4, 5, 6)</h3>
+<ul>
+  <li><b>Node Webhook & Prepare Input:</b> Nhận tín hiệu cân bằng tải cho dự án.</li>
+  <li><b>Node Get Unassigned Tasks (Postgres):</b> Truy vấn lấy 3 task đang có <code>assignee_id IS NULL</code>, sắp xếp theo thứ tự ưu tiên:
+    <ul>
+      <li>Task <code>API JWT</code> (Ưu tiên: <b>URGENT</b>)</li>
+      <li>Task <code>Google Cloud Console</code> (Ưu tiên: <b>HIGH</b>)</li>
+      <li>Task <code>Giao diện Đăng nhập</code> (Ưu tiên: <b>MEDIUM</b>)</li>
+    </ul>
+  </li>
+  <li><b>Node Collect Tasks & Has Tasks? (IF):</b> Đếm được 3 task cần phân bổ. <i>(Nếu không có task nào, rẽ sang <b>Respond No Tasks</b> báo hệ thống rảnh việc)</i>.</li>
+</ul>
+
+<h3>🔹 Chặng 2: Tính toán thuật toán cân bằng tải (Nodes 7, 8)</h3>
+<ul>
+  <li><b>Node Get Member Workload (Postgres):</b> Đếm số task đang làm của từng thành viên:
+    <ul>
+      <li><code>Van Huy</code>: Đang gánh <b>2/5 task</b> (Tải 40%).</li>
+      <li><code>Member 2</code>: Đang gánh <b>1/5 task</b> (Tải 20% &ndash; <b>Rảnh nhất!</b>).</li>
+      <li><code>Member 3</code>: Đang gánh <b>2/5 task</b> (Tải 40%).</li>
+    </ul>
+  </li>
+  <li><b>Node Compute Distribution (Code):</b> Thuật toán cân bằng tải tính toán phân bổ:
+    <ul>
+      <li>Task 1 (URGENT): Ưu tiên người rảnh nhất &rarr; Gán cho <b>Member 2</b> (Tải tăng lên 2/5).</li>
+      <li>Task 2 (HIGH): Gán cho <b>Van Huy</b> vì có điểm năng suất cao hơn (Tải tăng lên 3/5).</li>
+      <li>Task 3 (MEDIUM): Gán cho <b>Member 3</b> (Tải tăng lên 3/5).</li>
+      <li><i>Kết quả:</i> Cả 3 thành viên đều nhận việc cân đối, không ai vượt <code>max_workload = 5</code>.</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>🔹 Chặng 3: Cập nhật Database & Ghi vết sự kiện (Nodes 9, 10, 11)</h3>
+<ul>
+  <li><b>Node Update Assignees (Postgres):</b> Chạy lệnh SQL Batch UPDATE điền <code>assignee_id</code> vào bảng <code>tasks</code>.</li>
+  <li><b>Node Build Log SQL & Log Activity (Postgres):</b> Ghi 3 dòng <code>TASK_ASSIGNED</code> vào bảng <code>activity_history</code>.</li>
+</ul>
+
+<h3>🔹 Chặng 4: Cảnh báo quá tải & Báo cáo (Nodes 12, 13, 14, 15, 16)</h3>
+<ul>
+  <li><b>Node Build Summary & Has Overflow? (IF):</b> Kiểm tra số task bị dồn ứ = 0 &rarr; Không quá tải. <i>(Nếu cả đội đều đã kịch trần 5/5, node <b>Set Overflow Warning</b> sẽ kích hoạt để đổi tiêu đề email thành <code>⚠️ Team quá tải</code>)</i>.</li>
+  <li><b>Node Send Gmail & Respond Success:</b> Gửi email: 📧 <b>✅ [Luồng 2] Đã gán 3 task</b> kèm bảng tải mới: Huy (3/5), Member 2 (2/5), Member 3 (3/5).</li>
+</ul>
+
+<br>
+<!-- ============================================================== LUỒNG 3 ============================================================== -->
+<h2>🟢 LUỒNG 3: Skill Matrix Matching (19 Nodes)</h2>
+
+<div class="quote-box">
+  🗣 <b>Lời thoại mở đầu:</b><br>
+  "Thưa Thầy/Cô, đối với các task đòi hỏi chuyên môn kỹ thuật sâu, Luồng 3 vận hành ma trận đánh giá năng lực đa tiêu chí qua 5 chặng:"
+</div>
+
+<h3>🔹 Chặng 1: Tiếp nhận & Lọc task chuyên môn (Nodes 1, 2, 3, 4, 5, 6)</h3>
+<ul>
+  <li><b>Node Webhook & Prepare Input:</b> Đặt ngưỡng điểm năng lực tối thiểu = 40/100 điểm.</li>
+  <li><b>Node Get Candidate Tasks (Postgres):</b> Lọc các task có yêu cầu kỹ năng cụ thể:
+    <ul>
+      <li>Task <code>API JWT</code> yêu cầu: <code>['JWT', 'Backend']</code>.</li>
+      <li>Task <code>Giao diện Đăng nhập</code> yêu cầu: <code>['Next.js', 'Frontend']</code>.</li>
+    </ul>
+  </li>
+  <li><b>Node Collect Tasks & Has Tasks? (IF):</b> Xác nhận có 2 task chuyên môn cần so khớp.</li>
+</ul>
+
+<h3>🔹 Chặng 2: Ma trận chấm điểm đa tiêu chí (Nodes 7, 8)</h3>
+<ul>
+  <li><b>Node Get Members With Load (Postgres):</b> Đọc hồ sơ kỹ năng của thành viên:
+    <ul>
+      <li><code>Van Huy</code>: Skills = <code>['Next.js', 'PostgreSQL', 'Backend']</code>.</li>
+      <li><code>Member 2</code>: Skills = <code>['Frontend', 'UI/UX', 'Tailwind']</code>.</li>
+    </ul>
+  </li>
+  <li><b>Node Score Matching (Code):</b> Thuật toán chấm điểm theo công thức:
+    <div class="formula-box">
+      Điểm tổng = (60% &times; Kỹ năng trùng) + (25% &times; Slot trống) + (15% &times; Năng suất)
+    </div>
+    <ul>
+      <li><b>Task API JWT:</b> <code>Van Huy</code> trùng kỹ năng <code>Backend</code> &rarr; <b>Đạt 72.5 điểm</b> (Cao nhất).</li>
+      <li><b>Task Giao diện:</b> <code>Member 2</code> trùng kỹ năng <code>Frontend</code> &rarr; <b>Đạt 68.0 điểm</b> (Cao nhất).</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>🔹 Chặng 3: Phân loại đạt chuẩn & Hợp nhất luồng (Nodes 9, 10, 11, 12, 13)</h3>
+<ul>
+  <li><b>Node Qualified? (IF):</b> Cả 2 đều đạt điểm &ge; 40 &rarr; Đi vào node <b>Update Assignee</b> gán Task API cho Van Huy, Task Giao diện cho Member 2. <i>(Nếu ai có điểm &lt; 40, node <b>Set Needs Review</b> sẽ đánh dấu cần PM can thiệp)</i>.</li>
+  <li><b>Node Merge Results & Aggregate Results:</b> Hợp nhất các nhánh thành một mảng dữ liệu tổng hợp.</li>
+</ul>
+
+<h3>🔹 Chặng 4: AI giải trình & Lưu báo cáo (Nodes 14, 15, 16, 17)</h3>
+<ul>
+  <li><b>Node Build Explain Prompt & Gemini Explain:</b> Gửi kết quả chấm điểm sang AI. Gemini viết giải trình:
+    <div class="quote-box">"Task API JWT được gán cho Van Huy vì có kỹ năng Backend phù hợp nhất. Task Giao diện đăng nhập được gán cho Member 2 giúp tận dụng tốt thế mạnh Frontend. Cả hai đều có slot trống đảm bảo tiến độ."</div>
+  </li>
+  <li><b>Node Build Report & Save Report (Postgres):</b> Lưu kết quả vào bảng <code>reports</code> với loại <code>SKILL_MATCHING</code>, tỷ lệ rủi ro = <code>0.00%</code>.</li>
+</ul>
+
+<h3>🔹 Chặng 5: Gửi Gmail & Phản hồi (Nodes 18, 19)</h3>
+<ul>
+  <li><b>Node Send Gmail & Respond Success:</b> Gửi email giải trình chi tiết về hộp thư quản lý và phản hồi HTTP 200 cho client.</li>
+</ul>
+
+<br>
+<!-- ============================================================== LUỒNG 4 ============================================================== -->
+<h2>🟢 LUỒNG 4: Sprint Auto-scheduling (17 Nodes)</h2>
+
+<div class="quote-box">
+  🗣 <b>Lời thoại mở đầu:</b><br>
+  "Thưa Thầy/Cô, sau khi các task đã có người nhận, Luồng 4 sẽ tự động thiết lập thời gian biểu thi công Sprint qua 5 chặng:"
+</div>
+
+<h3>🔹 Chặng 1: Kiểm tra dự án & Hạn cam kết (Nodes 1, 2, 3, 4, 5)</h3>
+<ul>
+  <li><b>Node Webhook & Prepare Input:</b> Tiếp nhận Project ID và định mức tốc độ (2 story points/ngày).</li>
+  <li><b>Node Get Project (Postgres):</b> Lấy ngày bắt đầu <code>2026-10-19</code> (Thứ Hai) và Deadline cam kết <code>2026-12-31</code>.</li>
+  <li><b>Node Project Found? (IF):</b> Xác nhận dự án tồn tại. <i>(Nếu ID sai, rẽ sang <b>Respond 404</b>)</i>.</li>
+</ul>
+
+<h3>🔹 Chặng 2: Thuật toán tịnh tiến lịch Sprint (Nodes 6, 7)</h3>
+<ul>
+  <li><b>Node Get Sprint Tasks (Postgres):</b> Sắp xếp danh sách task theo thứ tự ưu tiên:
+    <ol>
+      <li><code>Xây dựng API JWT</code> (URGENT &ndash; 3 SP &ndash; Van Huy làm)</li>
+      <li><code>Cấu hình Google Cloud Console</code> (HIGH &ndash; 2 SP)</li>
+      <li><code>Tích hợp giao diện Đăng nhập</code> (MEDIUM &ndash; 3 SP &ndash; Member 2 làm)</li>
+    </ol>
+  </li>
+  <li><b>Node Schedule Calculation (Code):</b> Thuật toán lập lịch thi công:
+    <div class="formula-box">
+      Số ngày thi công = Story Points / (Tốc độ làm việc &times; Điểm năng suất)
+    </div>
+    <ul>
+      <li><b>Tự động nhảy qua Thứ 7 & Chủ Nhật</b> (chỉ tính ngày làm việc).</li>
+      <li><b>Mỗi người một timeline độc lập:</b>
+        <ul>
+          <li>Van Huy làm Task 1 (3 SP) mất 2 ngày &rarr; Bắt đầu Thứ Hai 19/10 &rarr; <b>Hạn chót due_date: Thứ Tư 21/10/2026</b>.</li>
+          <li>Member 2 làm Task 3 (3 SP) mất 2 ngày &rarr; Bắt đầu Thứ Hai 19/10 &rarr; <b>Hạn chót due_date: Thứ Tư 21/10/2026</b>.</li>
+        </ul>
+      </li>
+      <li><i>Kiểm tra:</i> Hạn chót 21/10 trước Deadline cam kết 31/12 &rarr; Số task trễ <code>late_count = 0</code>.</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>🔹 Chặng 3: Cập nhật Database & Ghi vết (Nodes 8, 9, 10)</h3>
+<ul>
+  <li><b>Node Update Due Dates (Postgres):</b> Cập nhật ngày <code>due_date</code> cho các task vào Database.</li>
+  <li><b>Node Build Log SQL & Log Activity (Postgres):</b> Ghi sự kiện <code>DUE_DATE_SET</code> vào bảng <code>activity_history</code>.</li>
+</ul>
+
+<h3>🔹 Chặng 4: Đánh giá rủi ro trễ hạn bằng AI (Nodes 11, 12, 13, 14, 15)</h3>
+<ul>
+  <li><b>Node Overruns Deadline? (IF):</b> Vì <code>late_count = 0</code> (đúng hạn) &rarr; Bỏ qua việc gọi AI phân tích rủi ro để tiết kiệm tài nguyên. <i>(Nếu có task trễ, node <b>Gemini Risk Analysis</b> sẽ kích hoạt để đề xuất giải pháp khắc phục)</i>.</li>
+  <li><b>Node Build Report & Save Report (Postgres):</b> Lưu vào bảng <code>reports</code> loại <code>DEADLINE_RISK</code>:
+    <ul>
+      <li><code>risk_score</code>: <code>0.00%</code>.</li>
+      <li><code>ai_summary</code>: <i>"Toàn bộ task dự kiến hoàn thành trước deadline dự án. Rủi ro trễ hạn: Thấp."</i></li>
+    </ul>
+  </li>
+</ul>
+
+<h3>🔹 Chặng 5: Gửi thông báo & Phản hồi (Nodes 16, 17)</h3>
+<ul>
+  <li><b>Node Send Gmail:</b> Gửi email: 📧 <b>✅ [Luồng 4] Lịch Sprint: rủi ro trễ hạn 0%</b> đến <code>htchannelas@gmail.com</code>.</li>
+  <li><b>Node Respond Success:</b> Trả về kết quả JSON lịch trình chi tiết hoàn tất quy trình.</li>
+</ul>
+
+<br>
+<hr>
+<div style="text-align: center; font-style: italic; color: #475569; margin-top: 15px;">
+  Tài liệu bảo vệ đồ án chuyên đề AI Automation - Sinh viên: Hoài Trinh
+</div>
+
+</body>
+</html>
