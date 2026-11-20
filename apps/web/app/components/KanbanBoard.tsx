@@ -6,6 +6,7 @@ import {
   Project,
   ActivityEntry,
   TaskStatus,
+  TaskPriority,
   TASK_STATUSES,
   STATUS_LABELS,
   STATUS_COLORS,
@@ -23,6 +24,24 @@ export default function KanbanBoard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingActivities, setIsLoadingActivities] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // Thêm task modal states
+  const [members, setMembers] = useState<Array<{ id: string; full_name: string }>>([]);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskAssignee, setNewTaskAssignee] = useState('');
+  const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('MEDIUM');
+  const [newTaskStatus, setNewTaskStatus] = useState<TaskStatus>('TODO');
+  const [newTaskDueDate, setNewTaskDueDate] = useState('');
+  const [isSubmittingTask, setIsSubmittingTask] = useState(false);
+
+  // Fetch members cho dropdown tạo task
+  useEffect(() => {
+    fetch('/api/members')
+      .then((res) => res.json())
+      .then((data) => setMembers(Array.isArray(data) ? data : []))
+      .catch((err) => console.error('Failed to fetch members:', err));
+  }, []);
 
   // Fetch projects lần đầu
   useEffect(() => {
@@ -126,6 +145,42 @@ export default function KanbanBoard() {
     }
   };
 
+  // Tạo task mới từ modal
+  const handleCreateTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTaskTitle.trim() || !selectedProjectId) return;
+    setIsSubmittingTask(true);
+    try {
+      const res = await fetch(`/api/projects/${selectedProjectId}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newTaskTitle.trim(),
+          assignee_id: newTaskAssignee || null,
+          priority: newTaskPriority,
+          status: newTaskStatus,
+          due_date: newTaskDueDate ? new Date(newTaskDueDate).toISOString() : null,
+        }),
+      });
+
+      if (res.ok) {
+        setToast({ message: 'Tạo task mới thành công!', type: 'success' });
+        setNewTaskTitle('');
+        setNewTaskDueDate('');
+        setIsCreateModalOpen(false);
+        fetchTasks();
+      } else {
+        const data = await res.json();
+        setToast({ message: data.error || 'Lỗi khi tạo task', type: 'error' });
+      }
+    } catch (err) {
+      console.error('Error creating task:', err);
+      setToast({ message: 'Không thể kết nối server', type: 'error' });
+    } finally {
+      setIsSubmittingTask(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
       {/* Toast Notification */}
@@ -154,23 +209,34 @@ export default function KanbanBoard() {
               </p>
             </div>
 
-            {/* Project Selector */}
-            <div className="flex items-center gap-2">
-              <label htmlFor="project-select" className="text-sm font-medium text-gray-600">
-                Dự án:
-              </label>
-              <select
-                id="project-select"
-                value={selectedProjectId}
-                onChange={(e) => setSelectedProjectId(e.target.value)}
-                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            {/* Project Selector & Actions */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <label htmlFor="project-select" className="text-sm font-medium text-gray-600">
+                  Dự án:
+                </label>
+                <select
+                  id="project-select"
+                  value={selectedProjectId}
+                  onChange={(e) => setSelectedProjectId(e.target.value)}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Nút Thêm Task Mới */}
+              <button
+                onClick={() => setIsCreateModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
               >
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+                <span className="text-base font-bold">+</span>
+                <span>Thêm Task</span>
+              </button>
             </div>
           </div>
 
@@ -267,6 +333,122 @@ export default function KanbanBoard() {
         <div className="mt-6">
           <ActivityLog activities={activities} isLoading={isLoadingActivities} />
         </div>
+
+        {/* Modal Thêm Task Mới */}
+        {isCreateModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl transition-all">
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                <h3 className="text-lg font-bold text-gray-900">➕ Thêm Task Mới</h3>
+                <button
+                  onClick={() => setIsCreateModalOpen(false)}
+                  className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateTask} className="mt-4 space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 uppercase">
+                    Tiêu đề task <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="VD: Viết tài liệu API..."
+                    value={newTaskTitle}
+                    onChange={(e) => setNewTaskTitle(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 uppercase">
+                      Người thực hiện
+                    </label>
+                    <select
+                      value={newTaskAssignee}
+                      onChange={(e) => setNewTaskAssignee(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="">-- Chưa gán --</option>
+                      {members.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.full_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 uppercase">
+                      Độ ưu tiên
+                    </label>
+                    <select
+                      value={newTaskPriority}
+                      onChange={(e) => setNewTaskPriority(e.target.value as TaskPriority)}
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="LOW">🟢 LOW</option>
+                      <option value="MEDIUM">🟡 MEDIUM</option>
+                      <option value="HIGH">🟠 HIGH</option>
+                      <option value="URGENT">🔴 URGENT</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 uppercase">
+                      Trạng thái ban đầu
+                    </label>
+                    <select
+                      value={newTaskStatus}
+                      onChange={(e) => setNewTaskStatus(e.target.value as TaskStatus)}
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="TODO">To Do</option>
+                      <option value="IN_PROGRESS">In Progress</option>
+                      <option value="IN_REVIEW">In Review</option>
+                      <option value="DONE">Done</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 uppercase">
+                      Hạn chót (Deadline)
+                    </label>
+                    <input
+                      type="date"
+                      value={newTaskDueDate}
+                      onChange={(e) => setNewTaskDueDate(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-6 flex justify-end gap-2 pt-2 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => setIsCreateModalOpen(false)}
+                    className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingTask}
+                    className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {isSubmittingTask ? 'Đang tạo...' : 'Tạo Task'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

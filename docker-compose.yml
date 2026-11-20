@@ -41,6 +41,8 @@ services:
       - n8n_data:/home/node/.n8n
     networks:
       - productivity_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - postgres
 
@@ -58,6 +60,8 @@ services:
       - pgadmin_data:/var/lib/pgadmin
     networks:
       - productivity_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - postgres
 
