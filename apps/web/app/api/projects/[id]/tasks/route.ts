@@ -35,3 +35,79 @@ export async function GET(
     );
   }
 }
+
+// POST /api/projects/[id]/tasks – Tạo task mới cho project
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: projectId } = await params;
+    const body = await request.json();
+
+    const {
+      title,
+      description = '',
+      assignee_id,
+      priority = 'MEDIUM',
+      status = 'TODO',
+      story_points = 3,
+      due_date = null,
+    } = body;
+
+    if (!title || typeof title !== 'string' || !title.trim()) {
+      return NextResponse.json(
+        { error: 'Tiêu đề task (title) là bắt buộc' },
+        { status: 400 }
+      );
+    }
+
+    const insertResult = await query(
+      `INSERT INTO tasks (
+        project_id,
+        assignee_id,
+        title,
+        description,
+        priority,
+        status,
+        story_points,
+        due_date,
+        is_bottleneck,
+        created_at,
+        updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE, NOW(), NOW())
+      RETURNING *`,
+      [
+        projectId,
+        assignee_id || null,
+        title.trim(),
+        description || null,
+        priority,
+        status,
+        story_points,
+        due_date || null,
+      ]
+    );
+
+    const newTask = insertResult.rows[0];
+
+    // Lấy thêm tên assignee nếu có
+    if (newTask.assignee_id) {
+      const memberRes = await query(
+        'SELECT full_name FROM members WHERE id = $1',
+        [newTask.assignee_id]
+      );
+      newTask.assignee_name = memberRes.rows[0]?.full_name || 'Chưa gán';
+    } else {
+      newTask.assignee_name = 'Chưa gán';
+    }
+
+    return NextResponse.json(newTask, { status: 201 });
+  } catch (error) {
+    console.error('Error creating task:', error);
+    return NextResponse.json(
+      { error: 'Failed to create task' },
+      { status: 500 }
+    );
+  }
+}
